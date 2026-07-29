@@ -8,9 +8,10 @@ import dts from 'vite-plugin-dts'
 export default defineConfig({
 	plugins: [
 		react(),
-		// No rollupTypes: with multiple entries we emit per-file declarations so both index.d.ts and
-		// react.d.ts (and the core/*.d.ts they reference) are produced.
-		dts({ include: ['src'], exclude: ['src/__tests__/**'] }),
+		// rollupTypes bundles each entry's declarations into a single self-contained .d.ts (index.d.ts,
+		// react.d.ts) with NO relative imports — so node16/nodenext type resolution (which requires
+		// explicit extensions on relative imports) resolves cleanly.
+		dts({ include: ['src'], exclude: ['src/__tests__/**', 'src/webflow/**'], rollupTypes: true }),
 	],
 	build: {
 		lib: {

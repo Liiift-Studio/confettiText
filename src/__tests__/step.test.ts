@@ -119,4 +119,19 @@ describe('burst promise + per-burst clear', () => {
 		await expect(burst).resolves.toBeUndefined()
 		spy.mockRestore()
 	})
+
+	it('resolves immediately and spawns nothing when requestAnimationFrame is unavailable', async () => {
+		vi.stubGlobal('requestAnimationFrame', undefined)
+		const burst = confettiText({ text: 'x', particleCount: 10 })
+		expect(pieces().length).toBe(0)
+		expect(document.querySelector(layerSel)).toBeNull() // no empty layer attached
+		await expect(burst).resolves.toBeUndefined()
+	})
+
+	it('.clear() after a burst already finished is a safe no-op', () => {
+		const burst = confettiText({ text: 'x', particleCount: 2, ticks: 2 })
+		flush(3) // finish it naturally
+		expect(() => burst.clear()).not.toThrow()
+		expect(pieces().length).toBe(0)
+	})
 })

@@ -4,10 +4,8 @@
 // manual (call `fire()` yourself).
 import { useCallback, useEffect, useRef } from 'react'
 import { confettiText, type ConfettiBurst } from '../core/adjust'
+import { makeKeyboardOperable } from '../core/a11y'
 import type { ConfettiTextOptions, ReactConfettiTextOptions } from '../core/types'
-
-/** Tags that fire `click` on Enter/Space natively — no keyboard shim needed. */
-const NATIVE_INTERACTIVE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'])
 
 /** What `useConfettiText` returns. */
 export interface ConfettiTextHandle {
@@ -85,36 +83,12 @@ export function useConfettiText(options: ReactConfettiTextOptions = {}): Confett
 		const onClick = (): void => {
 			fire()
 		}
-		const onKey = (e: KeyboardEvent): void => {
-			if (e.key === 'Enter' || e.key === ' ') {
-				e.preventDefault()
-				fire()
-			}
-		}
 		el.addEventListener('click', onClick)
-
-		const shim = !NATIVE_INTERACTIVE.has(el.tagName)
-		let addedTabIndex = false
-		let addedRole = false
-		if (shim) {
-			el.addEventListener('keydown', onKey)
-			if (!el.hasAttribute('tabindex')) {
-				el.tabIndex = 0
-				addedTabIndex = true
-			}
-			if (!el.hasAttribute('role')) {
-				el.setAttribute('role', 'button')
-				addedRole = true
-			}
-		}
+		const undoKeyboard = makeKeyboardOperable(el, () => fire())
 
 		return () => {
 			el.removeEventListener('click', onClick)
-			if (shim) {
-				el.removeEventListener('keydown', onKey)
-				if (addedTabIndex) el.removeAttribute('tabindex')
-				if (addedRole) el.removeAttribute('role')
-			}
+			undoKeyboard()
 		}
 	}, [trigger, fire])
 

@@ -10,7 +10,7 @@
 		"sourceMap": true,
 		"outDir": "dist",
 		"skipLibCheck": true,
-		"lib": ["ES2020", "DOM", "DOM.Iterable"]
+		"lib": ["ES2020", "ES2022.Intl", "DOM", "DOM.Iterable"]
 	},
 	"include": ["src"],
 	"exclude": ["node_modules", "dist", "site", "demo"]

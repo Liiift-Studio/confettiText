@@ -124,4 +124,20 @@ describe('symbols + graphemes', () => {
 		confettiText({ text: '👩‍🚀', particleCount: 2, colors: null, weightRange: null })
 		expect(pieces().every((p) => p.textContent === '👩‍🚀')).toBe(true)
 	})
+
+	it('makes an all-symbol burst when only symbols are given (no text)', () => {
+		confettiText({ symbols: ['🎉', '✨'], particleCount: 4 })
+		expect(new Set(pieces().map((p) => p.textContent))).toEqual(new Set(['🎉', '✨']))
+	})
+
+	it('shows symbols even when particleCount is smaller than the glyph pool', () => {
+		confettiText({ text: 'Congratulations', symbols: ['🎉'], particleCount: 2 })
+		expect(pieces().map((p) => p.textContent)).toContain('🎉')
+	})
+
+	it('drops empty symbol entries so there are no blank particles', () => {
+		confettiText({ text: 'x', symbols: ['', '🎉'], particleCount: 6 })
+		expect(pieces().every((p) => p.textContent !== '')).toBe(true)
+		expect(pieces().map((p) => p.textContent)).toContain('🎉')
+	})
 })

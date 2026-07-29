@@ -82,8 +82,8 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 
 | Option | Default | Description |
 |---|---|---|
-| `text` | see note | The word/phrase whose letters become confetti. Whitespace stripped; letters cycle through the pieces (emoji/combining sequences stay whole). Defaults to the bound element's text for `attachConfettiText`/the React bindings; a bare `confettiText()` with no `text` uses `'Yay'`. Text that strips to empty (and no `symbols`) falls back to a single `✦`. |
-| `symbols` | — | Extra glyphs (emoji, symbols, short strings) mixed into the pool alongside the letters. Pair with `text: ''` for an all-emoji burst, e.g. `symbols: ['🎉', '✨', '⭐']`. |
+| `text` | see note | The word/phrase whose letters become confetti. Whitespace stripped; letters cycle through the pieces (emoji/combining sequences stay whole). Defaults to the bound element's text for `attachConfettiText`/the React bindings; a bare `confettiText()` with neither `text` nor `symbols` uses `'Yay'`. Text that strips to empty (and no `symbols`) falls back to a single `✦`. |
+| `symbols` | — | Extra glyphs (emoji, symbols, short strings) mixed into the pool alongside the letters — passing only `symbols` (no `text`) gives an all-emoji burst, e.g. `symbols: ['🎉', '✨', '⭐']`. Emoji keep their native colour (the `colors` palette and `weightRange` only affect text glyphs). |
 | `particleCount` | `70` | How many letter-particles to emit. |
 | `angle` | `90` | Launch direction in degrees — 90 = straight up, 0 = right. |
 | `spread` | `62` | Angular spread of the burst in degrees. |
@@ -106,7 +106,7 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 
 **Core** — `@liiift-studio/confettitext`:
 
-- `confettiText(options?)` → `ConfettiBurst` — fire a one-shot burst (viewport-fraction `origin`). The returned burst is a `Promise<void>` that resolves when it finishes, with a `.clear()` to cancel just this burst.
+- `confettiText(options?)` → `ConfettiBurst` — fire a one-shot burst (viewport-fraction `origin`). The returned burst is a `Promise<void>` that resolves when it finishes, with a `.clear()` to cancel just this burst. Hold the returned value to use `.clear()` — it's only on the burst object, not on a `.then()`-chained promise — and note both natural completion and `.clear()` resolve the promise (a resolved burst's `.clear()` is a no-op).
 - `attachConfettiText(element, options?)` → `() => void` — click-to-burst (and Enter/Space) from an element's text/position; returns a detach fn.
 - `clearConfettiText()` — remove **every** live particle across all bursts, cancel the loop, detach the layer, and resolve every pending burst.
 - `CONFETTI_TEXT_CLASSES` — `{ layer: 'ct-layer', piece: 'ct-piece' }` for targeting the generated markup.
@@ -151,6 +151,10 @@ flowchart LR
 - SSR-safe — every entry point no-ops when `document` is undefined.
 
 ## Changelog
+
+**v2.1.1** — robustness + polish from a second deep review: fixes a rare burst-promise leak when `requestAnimationFrame` is unavailable; caps source-text length before grapheme segmentation; `symbols` now appear even at a low `particleCount`, drop empty entries, and `confettiText({ symbols })` alone (no `text`) is emoji-only. No API changes.
+
+**v2.1.0** — added the `symbols` option (mix emoji/symbols into the burst) and grapheme-aware text splitting, so emoji and combining sequences stay whole.
 
 **v2.0.0** — React bindings moved to the `@liiift-studio/confettitext/react` subpath (the main entry is now React-free, so a vanilla import never pulls React into your graph). `confettiText()` now returns a `ConfettiBurst` — a `Promise<void>` (await it) with a `.clear()` to cancel just that burst. Migrating from v1: change React imports to `…/react`; no code changes for vanilla users.
 

@@ -4,6 +4,7 @@
 // scaleY(cos(tilt)) paper-flip tumble) so the burst feels familiar; the letters, colours, and
 // variable-font weight jitter are the typographic layer on top.
 import { CONFETTI_TEXT_CLASSES, DEFAULT_COLORS, type ConfettiTextOptions } from './types'
+import { makeKeyboardOperable } from './a11y'
 
 /** Base particle font-size in px before `scalar` and per-particle jitter. */
 const BASE_SIZE = 18
@@ -90,16 +91,27 @@ interface BurstRecord {
 const _bursts = new Map<number, BurstRecord>()
 let _burstSeq = 0
 
-/** Wrap a promise + clear fn into a ConfettiBurst. */
+/** Wrap a promise + clear fn into a ConfettiBurst. `.clear` lives only on this object — chaining
+ *  (`.then()`/`.catch()`) returns a plain Promise without it; after the burst resolves, `.clear()` is
+ *  a no-op. */
 function makeBurst(promise: Promise<void>, clear: () => void): ConfettiBurst {
-	const burst = promise as ConfettiBurst
-	burst.clear = clear
-	return burst
+	return Object.assign(promise, { clear })
 }
 
-/** An already-finished burst — for no-op paths (SSR, reduced motion, zero particles). */
+/** An already-finished burst — for no-op paths (SSR, reduced motion, zero particles, no rAF). */
 function resolvedBurst(): ConfettiBurst {
 	return makeBurst(Promise.resolve(), () => {})
+}
+
+/** When no pieces remain, cancel the loop and detach the layer. The single teardown invariant. */
+function teardownIfIdle(): void {
+	if (_pieces.length) return
+	if (_raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(_raf)
+	_raf = 0
+	if (_layer) {
+		_layer.remove()
+		_layer = null
+	}
 }
 
 /** Retire just one burst's pieces and resolve it, leaving any other bursts running. */
@@ -115,15 +127,7 @@ function clearBurst(id: number): void {
 		b.resolve()
 		_bursts.delete(id)
 	}
-	// If that was the last burst, tear down the loop + layer like the natural end-of-life path.
-	if (!_pieces.length) {
-		if (_raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(_raf)
-		_raf = 0
-		if (_layer) {
-			_layer.remove()
-			_layer = null
-		}
-	}
+	teardownIfIdle() // tear down only if that was the last live burst
 }
 
 /** True when the user has asked the OS to reduce motion. */
@@ -182,51 +186,73 @@ function ensureLayer(zIndex: number): HTMLDivElement {
 	return layer
 }
 
-/** Minimal shape of the `Intl.Segmenter` we use — avoids requiring the ES2022 lib type. */
-type SegmenterCtor = new (
-	locale?: string,
-	opts?: { granularity: 'grapheme' },
-) => { segment(s: string): Iterable<{ segment: string }> }
+/** Max source-text length (chars) segmented per burst — bounds Intl.Segmenter work on huge input. */
+const MAX_TEXT_LEN = 4000
+/** Max distinct glyphs in the pool — particles cycle, so more than this is never needed. */
+const MAX_POOL = 1000
 
-/** Split a string into grapheme clusters, so emoji/combining sequences stay whole. */
-function segmentGraphemes(s: string): string[] {
-	if (!s) return []
-	const Seg = (Intl as unknown as { Segmenter?: SegmenterCtor }).Segmenter
-	if (typeof Seg === 'function') {
-		return Array.from(new Seg(undefined, { granularity: 'grapheme' }).segment(s), (x) => x.segment)
+/** Lazily-created shared grapheme segmenter: `undefined` = not tried, `null` = unavailable. */
+let _segmenter: { segment(s: string): Iterable<{ segment: string }> } | null | undefined
+function getSegmenter(): { segment(s: string): Iterable<{ segment: string }> } | null {
+	if (_segmenter === undefined) {
+		_segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
 	}
-	return Array.from(s) // fallback: code points (good enough for BMP + simple emoji)
+	return _segmenter
 }
 
 /**
- * Build the particle glyph pool: the (grapheme-split, whitespace-stripped) letters of `text` followed
- * by any `symbols`. Particles cycle through this pool. Falls back to a single sparkle if empty.
+ * Split a string into grapheme clusters, so emoji/combining sequences stay whole. When
+ * `Intl.Segmenter` is unavailable (legacy engines), falls back to code-point splitting — which keeps
+ * astral scalars whole but splits multi-scalar clusters (ZWJ emoji, flags, skin-tone modifiers,
+ * base+combining-mark). Segmenter ships in all evergreen browsers, so the fallback is rarely hit.
+ */
+function segmentGraphemes(s: string): string[] {
+	if (!s) return []
+	const seg = getSegmenter()
+	return seg ? Array.from(seg.segment(s), (x) => x.segment) : Array.from(s)
+}
+
+/**
+ * Build the particle glyph pool: `symbols` first (so they always appear even at a low `particleCount`),
+ * then the grapheme-split, whitespace-stripped letters of `text`. Empty `symbols` entries are dropped;
+ * the source text is length-capped before segmenting, and the pool is capped, to bound work. Falls back
+ * to a single sparkle if empty.
  */
 function toGlyphs(text: string, symbols?: string[]): string[] {
-	const letters = segmentGraphemes(text.replace(/\s+/g, ''))
-	const pool = symbols && symbols.length ? [...letters, ...symbols] : letters
+	const letters = segmentGraphemes(text.replace(/\s+/g, '').slice(0, MAX_TEXT_LEN))
+	const extra = symbols ? symbols.filter(Boolean) : []
+	let pool = extra.length ? [...extra, ...letters] : letters
+	if (pool.length > MAX_POOL) pool = pool.slice(0, MAX_POOL)
 	return pool.length ? pool : ['✦']
 }
 
 /** Emit a burst of letter-particles from an absolute viewport point (px); return its ConfettiBurst. */
-function fireAt(originX: number, originY: number, letters: string[], o: Resolved): ConfettiBurst {
+function fireAt(originX: number, originY: number, glyphs: string[], o: Resolved): ConfettiBurst {
 	const burstId = ++_burstSeq
 	let resolveFn: () => void = () => {}
 	const promise = new Promise<void>((res) => {
 		resolveFn = res
 	})
+	const burst = makeBurst(promise, () => clearBurst(burstId))
+
+	// Respect the global live-particle cap so rapid repeated bursts can't stack unbounded work.
+	const count = Math.min(o.particleCount, Math.max(0, MAX_LIVE_PIECES - _pieces.length))
+	// Nothing to spawn (zero count / cap full), or no rAF to animate with → finish immediately.
+	// Guarding here means we never attach an empty layer or leave a burst promise pending.
+	if (count <= 0 || typeof requestAnimationFrame !== 'function') {
+		resolveFn()
+		return burst
+	}
 
 	const layer = ensureLayer(o.zIndex)
 	const radAngle = (o.angle * Math.PI) / 180
 	const radSpread = (o.spread * Math.PI) / 180
-	// Respect the global live-particle cap so rapid repeated bursts can't stack unbounded work.
-	const count = Math.min(o.particleCount, Math.max(0, MAX_LIVE_PIECES - _pieces.length))
 	const frag = document.createDocumentFragment()
 
 	for (let i = 0; i < count; i++) {
 		const el = document.createElement('span')
 		el.className = CONFETTI_TEXT_CLASSES.piece
-		el.textContent = letters[i % letters.length]
+		el.textContent = glyphs[i % glyphs.length]
 		const size = BASE_SIZE * o.scalar * (0.75 + Math.random() * 0.6)
 		el.style.position = 'absolute'
 		el.style.top = '0'
@@ -269,19 +295,11 @@ function fireAt(originX: number, originY: number, letters: string[], o: Resolved
 	}
 	layer.appendChild(frag)
 
-	// Register the burst so step() can resolve it once its pieces retire; if it spawned nothing
-	// (zero particles / cap full), it's already finished.
-	if (count > 0) {
-		_bursts.set(burstId, { live: count, resolve: resolveFn })
-	} else {
-		resolveFn()
-	}
+	// Register the burst so step() can resolve it once its pieces retire (count > 0 guaranteed above).
+	_bursts.set(burstId, { live: count, resolve: resolveFn })
+	if (!_raf) _raf = requestAnimationFrame(step)
 
-	if (!_raf && typeof requestAnimationFrame === 'function') {
-		_raf = requestAnimationFrame(step)
-	}
-
-	return makeBurst(promise, () => clearBurst(burstId))
+	return burst
 }
 
 /** Advance every live particle one frame; retire spent or off-screen ones. */
@@ -320,11 +338,7 @@ function step(): void {
 		_raf = requestAnimationFrame(step)
 	} else {
 		_raf = 0
-		// No pieces left — don't leave an empty full-viewport layer attached to <body>.
-		if (_layer) {
-			_layer.remove()
-			_layer = null
-		}
+		teardownIfIdle() // no pieces left — detach the empty layer
 	}
 }
 
@@ -347,7 +361,9 @@ export function confettiText(options: ConfettiTextOptions = {}): ConfettiBurst {
 	if (o.disableForReducedMotion && prefersReducedMotion()) return resolvedBurst()
 	const originX = (options.origin?.x ?? 0.5) * window.innerWidth
 	const originY = (options.origin?.y ?? 0.5) * window.innerHeight
-	return fireAt(originX, originY, toGlyphs(options.text ?? 'Yay', options.symbols), o)
+	// If only `symbols` are given (no text), don't inject the 'Yay' default — make it symbols-only.
+	const text = options.text ?? (options.symbols?.length ? '' : 'Yay')
+	return fireAt(originX, originY, toGlyphs(text, options.symbols), o)
 }
 
 /**
@@ -356,9 +372,6 @@ export function confettiText(options: ConfettiTextOptions = {}): ConfettiBurst {
  *
  * @example const detach = attachConfettiText(document.querySelector('h1')!)
  */
-/** Tags that are focusable and fire `click` on Enter/Space natively — no keyboard shim needed. */
-const NATIVE_INTERACTIVE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'])
-
 export function attachConfettiText(element: HTMLElement, options: ConfettiTextOptions = {}): () => void {
 	if (typeof document === 'undefined') return () => {}
 
@@ -376,37 +389,12 @@ export function attachConfettiText(element: HTMLElement, options: ConfettiTextOp
 	}
 
 	const onClick = (): void => fire()
-	const onKey = (e: KeyboardEvent): void => {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault()
-			fire()
-		}
-	}
 	element.addEventListener('click', onClick)
-
-	// Keyboard operability: if the element isn't natively interactive, make it focusable + Enter/Space-able.
-	const shim = !NATIVE_INTERACTIVE.has(element.tagName)
-	let addedTabIndex = false
-	let addedRole = false
-	if (shim) {
-		element.addEventListener('keydown', onKey)
-		if (!element.hasAttribute('tabindex')) {
-			element.tabIndex = 0
-			addedTabIndex = true
-		}
-		if (!element.hasAttribute('role')) {
-			element.setAttribute('role', 'button')
-			addedRole = true
-		}
-	}
+	const undoKeyboard = makeKeyboardOperable(element, fire) // focus + Enter/Space for non-native elements
 
 	return () => {
 		element.removeEventListener('click', onClick)
-		if (shim) {
-			element.removeEventListener('keydown', onKey)
-			if (addedTabIndex) element.removeAttribute('tabindex')
-			if (addedRole) element.removeAttribute('role')
-		}
+		undoKeyboard()
 	}
 }
 
@@ -416,14 +404,9 @@ export function attachConfettiText(element: HTMLElement, options: ConfettiTextOp
  * {@link ConfettiBurst} that `confettiText()` returned.
  */
 export function clearConfettiText(): void {
-	if (_raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(_raf)
-	_raf = 0
 	for (const p of _pieces) p.el.remove()
 	_pieces = []
 	for (const b of _bursts.values()) b.resolve()
 	_bursts.clear()
-	if (_layer) {
-		_layer.remove()
-		_layer = null
-	}
+	teardownIfIdle() // _pieces is now empty, so this cancels the loop + detaches the layer
 }

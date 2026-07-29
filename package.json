@@ -1,21 +1,38 @@
 {
 	"name": "@liiift-studio/confettitext",
-	"version": "2.1.0",
+	"version": "2.1.1",
 	"description": "Confetti cannon where every particle is a real letter from your text — a burst of DOM letter-spans with physics, variable-font weight jitter, and a canvas-confetti-familiar API",
 	"type": "module",
 	"main": "dist/index.cjs",
 	"module": "dist/index.js",
 	"types": "dist/index.d.ts",
+	"typesVersions": {
+		"*": {
+			"react": [
+				"./dist/react.d.ts"
+			]
+		}
+	},
 	"exports": {
 		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
+			"import": {
+				"types": "./dist/index.d.ts",
+				"default": "./dist/index.js"
+			},
+			"require": {
+				"types": "./dist/index.d.cts",
+				"default": "./dist/index.cjs"
+			}
 		},
 		"./react": {
-			"types": "./dist/react.d.ts",
-			"import": "./dist/react.js",
-			"require": "./dist/react.cjs"
+			"import": {
+				"types": "./dist/react.d.ts",
+				"default": "./dist/react.js"
+			},
+			"require": {
+				"types": "./dist/react.d.cts",
+				"default": "./dist/react.cjs"
+			}
 		},
 		"./package.json": "./package.json"
 	},
@@ -23,7 +40,7 @@
 		"dist"
 	],
 	"scripts": {
-		"build": "vite build",
+		"build": "vite build && node scripts/copy-dcts.mjs",
 		"build:webflow": "vite build --config vite.webflow.config.ts",
 		"test": "vitest",
 		"test:run": "vitest run",
