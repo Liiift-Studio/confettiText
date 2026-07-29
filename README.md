@@ -11,6 +11,7 @@ A confetti cannon where every particle is a **real letter of your text** — not
 - **Real letters, real DOM** — each piece is a `<span>` in your actual (variable) font, cycled from your text.
 - **Familiar physics** — `particleCount`, `spread`, `angle`, `startVelocity`, `gravity`, `drift`, `decay`, `ticks`, `scalar`, `origin` behave just like canvas-confetti.
 - **Typographic flourish** — per-particle `wght` jitter via `weightRange`, and a festive `colors` palette (or monochrome `currentColor`).
+- **Mix in emoji** — add `symbols: ['🎉', '✨']` to sprinkle them through the letters (or `text: ''` for an all-emoji burst); emoji and combining sequences stay whole.
 - **Zero dependencies**, framework-agnostic (vanilla core + optional React bindings), TypeScript-first.
 - **Accessible** — the confetti layer is `aria-hidden`; bursts are skipped under `prefers-reduced-motion` by default; and the click trigger is **keyboard-operable** (focus + Enter/Space) when applied to a non-interactive element.
 
@@ -81,7 +82,8 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 
 | Option | Default | Description |
 |---|---|---|
-| `text` | see note | The word/phrase whose letters become confetti. Whitespace stripped; letters cycle through the pieces. Defaults to the bound element's text for `attachConfettiText`/the React bindings; a bare `confettiText()` with no `text` uses `'Yay'`. Text that strips to empty falls back to a single `✦`. |
+| `text` | see note | The word/phrase whose letters become confetti. Whitespace stripped; letters cycle through the pieces (emoji/combining sequences stay whole). Defaults to the bound element's text for `attachConfettiText`/the React bindings; a bare `confettiText()` with no `text` uses `'Yay'`. Text that strips to empty (and no `symbols`) falls back to a single `✦`. |
+| `symbols` | — | Extra glyphs (emoji, symbols, short strings) mixed into the pool alongside the letters. Pair with `text: ''` for an all-emoji burst, e.g. `symbols: ['🎉', '✨', '⭐']`. |
 | `particleCount` | `70` | How many letter-particles to emit. |
 | `angle` | `90` | Launch direction in degrees — 90 = straight up, 0 = right. |
 | `spread` | `62` | Angular spread of the burst in degrees. |

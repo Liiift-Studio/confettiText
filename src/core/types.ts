@@ -23,6 +23,12 @@ export interface ConfettiTextOptions {
 	 * (default: 'Yay')
 	 */
 	text?: string
+	/**
+	 * Extra glyphs — emoji, symbols, or short strings — mixed into the burst alongside the letters of
+	 * `text`. Each entry becomes its own particle. Pair with an empty `text` (`text: ''`) for an
+	 * all-emoji burst, e.g. `symbols: ['🎉', '✨', '⭐']`. Emoji/combining sequences are kept whole.
+	 */
+	symbols?: string[]
 	/** How many letter-particles to emit (default: 70). */
 	particleCount?: number
 	/** Launch direction in degrees — 90 points straight up, 0 points right (default: 90). */

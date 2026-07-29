@@ -108,3 +108,20 @@ describe('clearConfettiText', () => {
 		expect(pieces().length).toBe(0)
 	})
 })
+
+describe('symbols + graphemes', () => {
+	it('mixes symbols into the burst alongside the text letters', () => {
+		confettiText({ text: 'AB', symbols: ['🎉', '⭐'], particleCount: 8 })
+		expect(new Set(pieces().map((p) => p.textContent))).toEqual(new Set(['A', 'B', '🎉', '⭐']))
+	})
+
+	it('supports an all-symbol burst with empty text', () => {
+		confettiText({ text: '', symbols: ['🎉', '✨'], particleCount: 4 })
+		expect(new Set(pieces().map((p) => p.textContent))).toEqual(new Set(['🎉', '✨']))
+	})
+
+	it('keeps a ZWJ emoji sequence in text as a single particle', () => {
+		confettiText({ text: '👩‍🚀', particleCount: 2, colors: null, weightRange: null })
+		expect(pieces().every((p) => p.textContent === '👩‍🚀')).toBe(true)
+	})
+})

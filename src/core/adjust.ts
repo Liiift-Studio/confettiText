@@ -182,10 +182,30 @@ function ensureLayer(zIndex: number): HTMLDivElement {
 	return layer
 }
 
-/** Split source text into its non-whitespace letters; fall back to a sparkle if empty. */
-function toLetters(text: string): string[] {
-	const stripped = text.replace(/\s+/g, '')
-	return stripped.length ? Array.from(stripped) : ['✦']
+/** Minimal shape of the `Intl.Segmenter` we use — avoids requiring the ES2022 lib type. */
+type SegmenterCtor = new (
+	locale?: string,
+	opts?: { granularity: 'grapheme' },
+) => { segment(s: string): Iterable<{ segment: string }> }
+
+/** Split a string into grapheme clusters, so emoji/combining sequences stay whole. */
+function segmentGraphemes(s: string): string[] {
+	if (!s) return []
+	const Seg = (Intl as unknown as { Segmenter?: SegmenterCtor }).Segmenter
+	if (typeof Seg === 'function') {
+		return Array.from(new Seg(undefined, { granularity: 'grapheme' }).segment(s), (x) => x.segment)
+	}
+	return Array.from(s) // fallback: code points (good enough for BMP + simple emoji)
+}
+
+/**
+ * Build the particle glyph pool: the (grapheme-split, whitespace-stripped) letters of `text` followed
+ * by any `symbols`. Particles cycle through this pool. Falls back to a single sparkle if empty.
+ */
+function toGlyphs(text: string, symbols?: string[]): string[] {
+	const letters = segmentGraphemes(text.replace(/\s+/g, ''))
+	const pool = symbols && symbols.length ? [...letters, ...symbols] : letters
+	return pool.length ? pool : ['✦']
 }
 
 /** Emit a burst of letter-particles from an absolute viewport point (px); return its ConfettiBurst. */
@@ -327,7 +347,7 @@ export function confettiText(options: ConfettiTextOptions = {}): ConfettiBurst {
 	if (o.disableForReducedMotion && prefersReducedMotion()) return resolvedBurst()
 	const originX = (options.origin?.x ?? 0.5) * window.innerWidth
 	const originY = (options.origin?.y ?? 0.5) * window.innerHeight
-	return fireAt(originX, originY, toLetters(options.text ?? 'Yay'), o)
+	return fireAt(originX, originY, toGlyphs(options.text ?? 'Yay', options.symbols), o)
 }
 
 /**
@@ -351,8 +371,8 @@ export function attachConfettiText(element: HTMLElement, options: ConfettiTextOp
 			o.fontFamily = getComputedStyle(element).fontFamily || null
 		}
 		const rect = element.getBoundingClientRect()
-		const letters = toLetters(options.text ?? element.textContent ?? 'Yay')
-		fireAt(rect.left + rect.width / 2, rect.top + rect.height / 2, letters, o)
+		const glyphs = toGlyphs(options.text ?? element.textContent ?? 'Yay', options.symbols)
+		fireAt(rect.left + rect.width / 2, rect.top + rect.height / 2, glyphs, o)
 	}
 
 	const onClick = (): void => fire()

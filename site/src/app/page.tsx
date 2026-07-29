@@ -113,7 +113,8 @@ clearConfettiText()`} />
 								</tr>
 							</thead>
 							<tbody className="text-muted zebra">
-								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">text</td><td className="py-2 pr-6">element text</td><td className="py-2">The word/phrase whose letters become confetti. Whitespace is stripped; letters cycle through the pieces. Defaults to the bound element&rsquo;s text.</td></tr>
+								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">text</td><td className="py-2 pr-6">element text</td><td className="py-2">The word/phrase whose letters become confetti. Whitespace is stripped; letters cycle through the pieces (emoji stay whole). Defaults to the bound element&rsquo;s text.</td></tr>
+								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">symbols</td><td className="py-2 pr-6">&mdash;</td><td className="py-2">Extra glyphs (emoji, symbols) mixed into the pool alongside the letters. Pair with <span className="font-mono">{`text: ''`}</span> for an all-emoji burst, e.g. <span className="font-mono">{`['🎉','✨','⭐']`}</span>.</td></tr>
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">particleCount</td><td className="py-2 pr-6">70</td><td className="py-2">How many letter-particles to emit.</td></tr>
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">angle</td><td className="py-2 pr-6">90</td><td className="py-2">Launch direction in degrees — 90 points straight up, 0 points right.</td></tr>
 								<tr className="hover:bg-foreground/5 transition-colors"><td className="py-2 pr-6 font-mono">spread</td><td className="py-2 pr-6">62</td><td className="py-2">Angular spread of the burst in degrees; wider fans out more.</td></tr>
