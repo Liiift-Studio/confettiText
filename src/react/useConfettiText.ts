@@ -3,7 +3,7 @@
 // bursts its own text on click; `trigger` switches to fire-on-mount, fire-on-scroll-into-view, or
 // manual (call `fire()` yourself).
 import { useCallback, useEffect, useRef } from 'react'
-import { confettiText } from '../core/adjust'
+import { confettiText, type ConfettiBurst } from '../core/adjust'
 import type { ConfettiTextOptions, ReactConfettiTextOptions } from '../core/types'
 
 /** Tags that fire `click` on Enter/Space natively — no keyboard shim needed. */
@@ -13,8 +13,11 @@ const NATIVE_INTERACTIVE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA'
 export interface ConfettiTextHandle {
 	/** Attach to the element whose text should burst (and, for the `click` trigger, be clickable). */
 	ref: React.RefObject<HTMLElement | null>
-	/** Fire a burst imperatively from the element's position (or viewport centre if unattached). */
-	fire: (overrides?: ConfettiTextOptions) => void
+	/**
+	 * Fire a burst imperatively from the element's position (or viewport centre if unattached).
+	 * Returns the {@link ConfettiBurst} (awaitable; `.clear()` cancels just this burst).
+	 */
+	fire: (overrides?: ConfettiTextOptions) => ConfettiBurst
 }
 
 /**
@@ -30,12 +33,12 @@ export function useConfettiText(options: ReactConfettiTextOptions = {}): Confett
 	const optionsRef = useRef(options)
 	optionsRef.current = options
 
-	const fire = useCallback((overrides: ConfettiTextOptions = {}): void => {
+	const fire = useCallback((overrides: ConfettiTextOptions = {}): ConfettiBurst => {
 		const opts = { ...optionsRef.current, ...overrides }
 		const el = ref.current
 		if (el && typeof window !== 'undefined') {
 			const rect = el.getBoundingClientRect()
-			confettiText({
+			return confettiText({
 				...opts,
 				text: opts.text ?? el.textContent ?? undefined,
 				// Inherit the element's own font so the burst matches the text it came from.
@@ -45,9 +48,8 @@ export function useConfettiText(options: ReactConfettiTextOptions = {}): Confett
 					y: (rect.top + rect.height / 2) / window.innerHeight,
 				},
 			})
-		} else {
-			confettiText(opts)
 		}
+		return confettiText(opts)
 	}, [])
 
 	const trigger = options.trigger ?? 'click'
@@ -80,7 +82,9 @@ export function useConfettiText(options: ReactConfettiTextOptions = {}): Confett
 		}
 
 		// 'click' — plus keyboard operability for non-interactive elements (WCAG 2.1.1).
-		const onClick = (): void => fire()
+		const onClick = (): void => {
+			fire()
+		}
 		const onKey = (e: KeyboardEvent): void => {
 			if (e.key === 'Enter' || e.key === ' ') {
 				e.preventDefault()

@@ -22,10 +22,12 @@ npm install @liiift-studio/confettitext
 
 ## Quickstart
 
+> **React bindings live at the `/react` subpath** so a vanilla import never pulls React into your bundle. Import them from `@liiift-studio/confettitext/react`.
+
 ### React — drop-in component (click to burst its own text)
 
 ```tsx
-import { ConfettiText } from '@liiift-studio/confettitext'
+import { ConfettiText } from '@liiift-studio/confettitext/react'
 
 <ConfettiText as="h1" particleCount={120} spread={80}>
   Congrats!
@@ -35,7 +37,7 @@ import { ConfettiText } from '@liiift-studio/confettitext'
 ### React — hook with imperative `fire()`
 
 ```tsx
-import { useConfettiText } from '@liiift-studio/confettitext'
+import { useConfettiText } from '@liiift-studio/confettitext/react'
 
 const { ref, fire } = useConfettiText({ particleCount: 90 })
 
@@ -50,13 +52,16 @@ The component/hook set `origin` from the element's on-screen position automatica
 ```ts
 import { confettiText, attachConfettiText, clearConfettiText } from '@liiift-studio/confettitext'
 
-// One-off burst from the viewport centre:
-confettiText({ text: 'Hooray', particleCount: 120, spread: 90 })
+// One-off burst from the viewport centre. Returns a ConfettiBurst — a Promise that resolves when
+// the burst finishes, with a .clear() to cancel just this burst:
+const burst = confettiText({ text: 'Hooray', particleCount: 120, spread: 90 })
+await burst            // wait for it to settle (e.g. before navigating)
+// burst.clear()       // …or cancel only this burst, leaving others running
 
 // Make an element burst its own text on click; returns a detach fn:
 const detach = attachConfettiText(document.querySelector('h1')!)
 
-// Cancel everything in flight and remove the layer:
+// Cancel EVERY in-flight burst and remove the layer:
 clearConfettiText()
 ```
 
@@ -97,17 +102,22 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 
 ## API
 
-- `confettiText(options?)` — fire a one-shot burst (viewport-fraction `origin`).
-- `attachConfettiText(element, options?)` → `() => void` — click-to-burst from an element's text/position; returns a detach fn.
-- `clearConfettiText()` — remove every live particle, cancel the loop, detach the layer.
-- `useConfettiText(options?)` → `{ ref, fire }` — React binding. `ref` attaches to the source element; `fire(overrides?)` triggers a burst imperatively.
-- `<ConfettiText as="span" …>children</ConfettiText>` — React component. Renders `children` as the source text and, beyond the burst options, accepts `as` (default `'span'`), `className`, `style`, `aria-label`, and `role`.
+**Core** — `@liiift-studio/confettitext`:
+
+- `confettiText(options?)` → `ConfettiBurst` — fire a one-shot burst (viewport-fraction `origin`). The returned burst is a `Promise<void>` that resolves when it finishes, with a `.clear()` to cancel just this burst.
+- `attachConfettiText(element, options?)` → `() => void` — click-to-burst (and Enter/Space) from an element's text/position; returns a detach fn.
+- `clearConfettiText()` — remove **every** live particle across all bursts, cancel the loop, detach the layer, and resolve every pending burst.
 - `CONFETTI_TEXT_CLASSES` — `{ layer: 'ct-layer', piece: 'ct-piece' }` for targeting the generated markup.
 - `DEFAULT_COLORS` — the festive palette used when `colors` is unspecified.
 
+**React** — `@liiift-studio/confettitext/react`:
+
+- `useConfettiText(options?)` → `{ ref, fire }` — `ref` attaches to the source element; `fire(overrides?)` returns the `ConfettiBurst`.
+- `<ConfettiText as="span" …>children</ConfettiText>` — renders `children` as the source text and, beyond the burst options, accepts `as` (default `'span'`), `className`, `style`, `aria-label`, and `role`.
+
 ### Exported types
 
-`ConfettiTextOptions` (the core burst options), `ReactConfettiTextOptions` (`extends ConfettiTextOptions` with `trigger` — used by the hook/component), `ConfettiOrigin` (`{ x?, y? }`), `ConfettiTrigger` (`'click' | 'mount' | 'inView' | 'manual'`), and `ConfettiTextHandle` (the `{ ref, fire }` returned by `useConfettiText`).
+From the core entry: `ConfettiTextOptions` (the burst options), `ConfettiOrigin` (`{ x?, y? }`), and `ConfettiBurst` (`Promise<void> & { clear() }`). From `/react`: `ReactConfettiTextOptions` (`extends ConfettiTextOptions` with `trigger`), `ConfettiTrigger` (`'click' | 'mount' | 'inView' | 'manual'`), and `ConfettiTextHandle` (the `{ ref, fire }` returned by `useConfettiText`). `/react` also re-exports the core surface for convenience.
 
 ## How it works
 
@@ -137,6 +147,10 @@ flowchart LR
 - Modern browsers with `requestAnimationFrame` (all evergreen browsers).
 - React 17+ for the optional bindings (peer dependency; the vanilla core needs no framework).
 - SSR-safe — every entry point no-ops when `document` is undefined.
+
+## Changelog
+
+**v2.0.0** — React bindings moved to the `@liiift-studio/confettitext/react` subpath (the main entry is now React-free, so a vanilla import never pulls React into your graph). `confettiText()` now returns a `ConfettiBurst` — a `Promise<void>` (await it) with a `.clear()` to cancel just that burst. Migrating from v1: change React imports to `…/react`; no code changes for vanilla users.
 
 ## License
 

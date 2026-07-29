@@ -74,7 +74,7 @@ export default function Home() {
 				<div className="flex flex-col gap-8 text-sm">
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Drop-in component — click to burst its own text</p>
-						<CodeBlock code={`import { ConfettiText } from '@liiift-studio/confettitext'
+						<CodeBlock code={`import { ConfettiText } from '@liiift-studio/confettitext/react'
 
 <ConfettiText as="h1" particleCount={120} spread={80}>
   Congrats!
@@ -82,7 +82,7 @@ export default function Home() {
 					</div>
 					<div className="flex flex-col gap-3">
 						<p className="text-muted">Hook — imperative fire()</p>
-						<CodeBlock code={`import { useConfettiText } from '@liiift-studio/confettitext'
+						<CodeBlock code={`import { useConfettiText } from '@liiift-studio/confettitext/react'
 
 const { ref, fire } = useConfettiText({ particleCount: 90 })
 <h1 ref={ref}>You did it</h1>

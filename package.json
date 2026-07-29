@@ -1,6 +1,6 @@
 {
 	"name": "@liiift-studio/confettitext",
-	"version": "1.0.3",
+	"version": "2.0.0",
 	"description": "Confetti cannon where every particle is a real letter from your text — a burst of DOM letter-spans with physics, variable-font weight jitter, and a canvas-confetti-familiar API",
 	"type": "module",
 	"main": "dist/index.cjs",
@@ -11,7 +11,13 @@
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js",
 			"require": "./dist/index.cjs"
-		}
+		},
+		"./react": {
+			"types": "./dist/react.d.ts",
+			"import": "./dist/react.js",
+			"require": "./dist/react.cjs"
+		},
+		"./package.json": "./package.json"
 	},
 	"files": [
 		"dist"

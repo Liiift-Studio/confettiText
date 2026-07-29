@@ -92,3 +92,31 @@ describe('resolve() clamps (self-DoS guard)', () => {
 		expect(() => confettiText({ text: 'x', particleCount: Infinity, ticks: 5 })).not.toThrow()
 	})
 })
+
+describe('burst promise + per-burst clear', () => {
+	it('returns a ConfettiBurst (thenable with .clear) that resolves when finished', async () => {
+		const burst = confettiText({ text: 'x', particleCount: 2, ticks: 2 })
+		expect(typeof burst.then).toBe('function')
+		expect(typeof burst.clear).toBe('function')
+		flush(3) // drive both pieces to retirement
+		await expect(burst).resolves.toBeUndefined()
+	})
+
+	it('.clear() cancels only its own burst, leaving others running', () => {
+		const a = confettiText({ text: 'a', particleCount: 3, ticks: 200 })
+		confettiText({ text: 'b', particleCount: 4, ticks: 200 })
+		expect(pieces().length).toBe(7)
+		a.clear()
+		expect(pieces().length).toBe(4) // only burst b's pieces remain
+		expect(document.querySelector(layerSel)).toBeTruthy() // layer stays while b is in flight
+	})
+
+	it('a no-op burst (reduced motion) still returns a resolved ConfettiBurst', async () => {
+		const spy = vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true } as MediaQueryList)
+		const burst = confettiText({ text: 'x', particleCount: 5 })
+		expect(pieces().length).toBe(0)
+		expect(typeof burst.clear).toBe('function')
+		await expect(burst).resolves.toBeUndefined()
+		spy.mockRestore()
+	})
+})

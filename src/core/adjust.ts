@@ -62,7 +62,16 @@ interface Piece {
 	drift: number
 	decay: number
 	flat: boolean
+	/** Which burst this piece belongs to, so bursts can resolve/clear independently. */
+	burstId: number
 }
+
+/**
+ * A fired burst. It is a `Promise<void>` that resolves once the burst's pieces have all retired
+ * (mirroring canvas-confetti's awaitable return), augmented with `clear()` to cancel just this burst
+ * — other in-flight bursts keep running (unlike the global {@link clearConfettiText}).
+ */
+export type ConfettiBurst = Promise<void> & { clear: () => void }
 
 // ─── Shared layer + animation loop (one per document) ─────────────────────────
 
@@ -72,6 +81,50 @@ let _layer: HTMLDivElement | null = null
 let _pieces: Piece[] = []
 /** Handle for the running rAF loop, or 0 when idle. */
 let _raf = 0
+
+/** Per-burst live-count + resolver, keyed by burst id. */
+interface BurstRecord {
+	live: number
+	resolve: () => void
+}
+const _bursts = new Map<number, BurstRecord>()
+let _burstSeq = 0
+
+/** Wrap a promise + clear fn into a ConfettiBurst. */
+function makeBurst(promise: Promise<void>, clear: () => void): ConfettiBurst {
+	const burst = promise as ConfettiBurst
+	burst.clear = clear
+	return burst
+}
+
+/** An already-finished burst — for no-op paths (SSR, reduced motion, zero particles). */
+function resolvedBurst(): ConfettiBurst {
+	return makeBurst(Promise.resolve(), () => {})
+}
+
+/** Retire just one burst's pieces and resolve it, leaving any other bursts running. */
+function clearBurst(id: number): void {
+	for (let i = _pieces.length - 1; i >= 0; i--) {
+		if (_pieces[i].burstId === id) {
+			_pieces[i].el.remove()
+			_pieces.splice(i, 1)
+		}
+	}
+	const b = _bursts.get(id)
+	if (b) {
+		b.resolve()
+		_bursts.delete(id)
+	}
+	// If that was the last burst, tear down the loop + layer like the natural end-of-life path.
+	if (!_pieces.length) {
+		if (_raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(_raf)
+		_raf = 0
+		if (_layer) {
+			_layer.remove()
+			_layer = null
+		}
+	}
+}
 
 /** True when the user has asked the OS to reduce motion. */
 function prefersReducedMotion(): boolean {
@@ -135,8 +188,14 @@ function toLetters(text: string): string[] {
 	return stripped.length ? Array.from(stripped) : ['✦']
 }
 
-/** Emit a burst of letter-particles from an absolute viewport point (px). */
-function fireAt(originX: number, originY: number, letters: string[], o: Resolved): void {
+/** Emit a burst of letter-particles from an absolute viewport point (px); return its ConfettiBurst. */
+function fireAt(originX: number, originY: number, letters: string[], o: Resolved): ConfettiBurst {
+	const burstId = ++_burstSeq
+	let resolveFn: () => void = () => {}
+	const promise = new Promise<void>((res) => {
+		resolveFn = res
+	})
+
 	const layer = ensureLayer(o.zIndex)
 	const radAngle = (o.angle * Math.PI) / 180
 	const radSpread = (o.spread * Math.PI) / 180
@@ -185,13 +244,24 @@ function fireAt(originX: number, originY: number, letters: string[], o: Resolved
 			drift: o.drift,
 			decay: o.decay,
 			flat: o.flat,
+			burstId,
 		})
 	}
 	layer.appendChild(frag)
 
+	// Register the burst so step() can resolve it once its pieces retire; if it spawned nothing
+	// (zero particles / cap full), it's already finished.
+	if (count > 0) {
+		_bursts.set(burstId, { live: count, resolve: resolveFn })
+	} else {
+		resolveFn()
+	}
+
 	if (!_raf && typeof requestAnimationFrame === 'function') {
 		_raf = requestAnimationFrame(step)
 	}
+
+	return makeBurst(promise, () => clearBurst(burstId))
 }
 
 /** Advance every live particle one frame; retire spent or off-screen ones. */
@@ -219,6 +289,11 @@ function step(): void {
 		if (p.tick >= p.totalTicks || wy > viewportH + 80 || wx < -120 || wx > viewportW + 120) {
 			p.el.remove()
 			_pieces.splice(i, 1)
+			const b = _bursts.get(p.burstId)
+			if (b && --b.live <= 0) {
+				b.resolve()
+				_bursts.delete(p.burstId)
+			}
 		}
 	}
 	if (_pieces.length && typeof requestAnimationFrame === 'function') {
@@ -240,15 +315,19 @@ function step(): void {
  * fraction (default centre). Safe to call repeatedly — bursts share one layer and animation loop.
  * No-op during SSR or (by default) when the user prefers reduced motion.
  *
- * @example confettiText({ text: 'Hooray', particleCount: 120, spread: 90 })
+ * Returns a {@link ConfettiBurst}: a `Promise<void>` that resolves when this burst finishes, with a
+ * `.clear()` method to cancel just this burst.
+ *
+ * @example await confettiText({ text: 'Hooray', particleCount: 120, spread: 90 })
+ * @example const burst = confettiText({ text: 'Yay' }); burst.clear() // cancel only this one
  */
-export function confettiText(options: ConfettiTextOptions = {}): void {
-	if (typeof document === 'undefined' || !document.body) return
+export function confettiText(options: ConfettiTextOptions = {}): ConfettiBurst {
+	if (typeof document === 'undefined' || !document.body) return resolvedBurst()
 	const o = resolve(options)
-	if (o.disableForReducedMotion && prefersReducedMotion()) return
+	if (o.disableForReducedMotion && prefersReducedMotion()) return resolvedBurst()
 	const originX = (options.origin?.x ?? 0.5) * window.innerWidth
 	const originY = (options.origin?.y ?? 0.5) * window.innerHeight
-	fireAt(originX, originY, toLetters(options.text ?? 'Yay'), o)
+	return fireAt(originX, originY, toLetters(options.text ?? 'Yay'), o)
 }
 
 /**
@@ -311,12 +390,18 @@ export function attachConfettiText(element: HTMLElement, options: ConfettiTextOp
 	}
 }
 
-/** Immediately remove every live particle, cancel the loop, and detach the layer. */
+/**
+ * Immediately remove every live particle across ALL bursts, cancel the loop, detach the layer, and
+ * resolve every pending burst promise. To cancel a single burst instead, use the `.clear()` on the
+ * {@link ConfettiBurst} that `confettiText()` returned.
+ */
 export function clearConfettiText(): void {
 	if (_raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(_raf)
 	_raf = 0
 	for (const p of _pieces) p.el.remove()
 	_pieces = []
+	for (const b of _bursts.values()) b.resolve()
+	_bursts.clear()
 	if (_layer) {
 		_layer.remove()
 		_layer = null
