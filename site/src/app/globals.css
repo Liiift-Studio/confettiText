@@ -1,0 +1,14 @@
+/* Per-tool theme for confettiText — base styles live in base.css (synced from type-tools/shared/styles/).
+   A dark celebration stage with a warm-red hue; the demo scatters festive letter-particles on top. */
+@import "tailwindcss";
+@import "./base.css";
+
+:root {
+	--background: oklch(0.10 0.05 0);
+	--foreground: oklch(0.97 0.008 0);
+	--foreground-muted: oklch(0.78 0.025 0);
+	--foreground-subtle: oklch(0.66 0.020 0);
+	--foreground-faint: oklch(0.55 0.016 0);
+	--btn-bg: oklch(0.18 0.03 0);
+	--panel: oklch(0.16 0.04 0);
+}
