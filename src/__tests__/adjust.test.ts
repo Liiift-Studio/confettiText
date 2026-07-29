@@ -46,10 +46,10 @@ describe('confettiText', () => {
 		expect(pieces().every((p) => p.style.fontVariationSettings.includes('500'))).toBe(true)
 	})
 
-	it('reuses a single layer across repeated bursts', () => {
+	it('gives each concurrent burst its own layer', () => {
 		confettiText({ text: 'x', particleCount: 4 })
 		confettiText({ text: 'y', particleCount: 4 })
-		expect(document.querySelectorAll(layerSel).length).toBe(1)
+		expect(document.querySelectorAll(layerSel).length).toBe(2) // one layer per burst
 		expect(pieces().length).toBe(8)
 	})
 
@@ -139,5 +139,18 @@ describe('symbols + graphemes', () => {
 		confettiText({ text: 'x', symbols: ['', '🎉'], particleCount: 6 })
 		expect(pieces().every((p) => p.textContent !== '')).toBe(true)
 		expect(pieces().map((p) => p.textContent)).toContain('🎉')
+	})
+
+	it('emits geometric shapes as div particles (circle gets a 50% radius)', () => {
+		confettiText({ text: '', shapes: ['square', 'circle'], particleCount: 6 })
+		const divs = pieces().filter((p) => p.tagName === 'DIV')
+		expect(divs.length).toBe(6) // text is empty → all particles are shapes
+		expect(divs.some((el) => el.style.borderRadius === '50%')).toBe(true)
+	})
+
+	it('mixes shapes with letters', () => {
+		confettiText({ text: 'Ab', shapes: ['strip'], particleCount: 30 })
+		expect(pieces().some((p) => p.tagName === 'DIV')).toBe(true) // at least one shape
+		expect(pieces().some((p) => p.tagName === 'SPAN')).toBe(true) // and letters
 	})
 })

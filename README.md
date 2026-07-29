@@ -11,7 +11,7 @@ A confetti cannon where every particle is a **real letter of your text** — not
 - **Real letters, real DOM** — each piece is a `<span>` in your actual (variable) font, cycled from your text.
 - **Familiar physics** — `particleCount`, `spread`, `angle`, `startVelocity`, `gravity`, `drift`, `decay`, `ticks`, `scalar`, `origin` behave just like canvas-confetti.
 - **Typographic flourish** — per-particle `wght` jitter via `weightRange`, and a festive `colors` palette (or monochrome `currentColor`).
-- **Mix in emoji** — add `symbols: ['🎉', '✨']` to sprinkle them through the letters (or `text: ''` for an all-emoji burst); emoji and combining sequences stay whole.
+- **Mix in emoji & shapes** — add `symbols: ['🎉', '✨']` or classic `shapes: ['circle', 'strip']` to sprinkle them through the letters (or `text: ''` for an all-emoji / all-shape burst); emoji and combining sequences stay whole.
 - **Zero dependencies**, framework-agnostic (vanilla core + optional React bindings), TypeScript-first.
 - **Accessible** — the confetti layer is `aria-hidden`; bursts are skipped under `prefers-reduced-motion` by default; and the click trigger is **keyboard-operable** (focus + Enter/Space) when applied to a non-interactive element.
 
@@ -53,11 +53,11 @@ The component/hook set `origin` from the element's on-screen position automatica
 ```ts
 import { confettiText, attachConfettiText, clearConfettiText } from '@liiift-studio/confettitext'
 
-// One-off burst from the viewport centre. Returns a ConfettiBurst — a Promise that resolves when
-// the burst finishes, with a .clear() to cancel just this burst:
+// One-off burst from the viewport centre. Returns a ConfettiBurst — a Promise resolving to
+// 'completed' | 'cleared', with a .clear() to cancel just this burst:
 const burst = confettiText({ text: 'Hooray', particleCount: 120, spread: 90 })
-await burst            // wait for it to settle (e.g. before navigating)
-// burst.clear()       // …or cancel only this burst, leaving others running
+const how = await burst  // 'completed' (ran its course) or 'cleared' (cancelled)
+// burst.clear()         // …cancel only this burst, leaving others running
 
 // Make an element burst its own text on click; returns a detach fn:
 const detach = attachConfettiText(document.querySelector('h1')!)
@@ -84,6 +84,7 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 |---|---|---|
 | `text` | see note | The word/phrase whose letters become confetti. Whitespace stripped; letters cycle through the pieces (emoji/combining sequences stay whole). Defaults to the bound element's text for `attachConfettiText`/the React bindings; a bare `confettiText()` with neither `text` nor `symbols` uses `'Yay'`. Text that strips to empty (and no `symbols`) falls back to a single `✦`. |
 | `symbols` | — | Extra glyphs (emoji, symbols, short strings) mixed into the pool alongside the letters — passing only `symbols` (no `text`) gives an all-emoji burst, e.g. `symbols: ['🎉', '✨', '⭐']`. Emoji keep their native colour (the `colors` palette and `weightRange` only affect text glyphs). |
+| `shapes` | — | Geometric particles (classic paper confetti) mixed in: `'square'`, `'circle'`, `'strip'`. Coloured from `colors` (or `currentColor`). Pair with `text: ''` for a shapes-only burst. |
 | `particleCount` | `70` | How many letter-particles to emit. |
 | `angle` | `90` | Launch direction in degrees — 90 = straight up, 0 = right. |
 | `spread` | `62` | Angular spread of the burst in degrees. |
@@ -106,7 +107,7 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 
 **Core** — `@liiift-studio/confettitext`:
 
-- `confettiText(options?)` → `ConfettiBurst` — fire a one-shot burst (viewport-fraction `origin`). The returned burst is a `Promise<void>` that resolves when it finishes, with a `.clear()` to cancel just this burst. Hold the returned value to use `.clear()` — it's only on the burst object, not on a `.then()`-chained promise — and note both natural completion and `.clear()` resolve the promise (a resolved burst's `.clear()` is a no-op).
+- `confettiText(options?)` → `ConfettiBurst` — fire a one-shot burst (viewport-fraction `origin`). The returned burst is a `Promise<'completed' | 'cleared'>` (resolves `'completed'` when it runs its course, `'cleared'` if cancelled) with a `.clear()` to cancel just this burst. Hold the returned value to use `.clear()` — it's only on the burst object, not on a `.then()`-chained promise — and a resolved burst's `.clear()` is a no-op. Each burst gets its own fixed layer, so `zIndex` is independent per burst.
 - `attachConfettiText(element, options?)` → `() => void` — click-to-burst (and Enter/Space) from an element's text/position; returns a detach fn.
 - `clearConfettiText()` — remove **every** live particle across all bursts, cancel the loop, detach the layer, and resolve every pending burst.
 - `CONFETTI_TEXT_CLASSES` — `{ layer: 'ct-layer', piece: 'ct-piece' }` for targeting the generated markup.
@@ -119,7 +120,7 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 
 ### Exported types
 
-From the core entry: `ConfettiTextOptions` (the burst options), `ConfettiOrigin` (`{ x?, y? }`), and `ConfettiBurst` (`Promise<void> & { clear() }`). From `/react`: `ReactConfettiTextOptions` (`extends ConfettiTextOptions` with `trigger`), `ConfettiTrigger` (`'click' | 'mount' | 'inView' | 'manual'`), and `ConfettiTextHandle` (the `{ ref, fire }` returned by `useConfettiText`). `/react` also re-exports the core surface for convenience.
+From the core entry: `ConfettiTextOptions` (the burst options), `ConfettiOrigin` (`{ x?, y? }`), `ConfettiShape` (`'square' | 'circle' | 'strip'`), `ConfettiResult` (`'completed' | 'cleared'`), and `ConfettiBurst` (`Promise<ConfettiResult> & { clear() }`). From `/react`: `ReactConfettiTextOptions` (`extends ConfettiTextOptions` with `trigger`), `ConfettiTrigger` (`'click' | 'mount' | 'inView' | 'manual'`), and `ConfettiTextHandle` (the `{ ref, fire }` returned by `useConfettiText`). `/react` also re-exports the core surface for convenience.
 
 ## How it works
 
@@ -151,6 +152,8 @@ flowchart LR
 - SSR-safe — every entry point no-ops when `document` is undefined.
 
 ## Changelog
+
+**v3.0.0** — `shapes` option (classic geometric confetti — `square`/`circle`/`strip` — mixed with the letters); each burst now gets **its own layer**, so `zIndex` is independent per burst (concurrent bursts no longer clobber each other's stacking); and the burst promise resolves to `'completed' | 'cleared'` so you can tell a finished burst from a cancelled one. Migrating from v2: `await confettiText(...)` now yields a `ConfettiResult` string instead of `void` — harmless unless you typed the result as `void`.
 
 **v2.1.1** — robustness + polish from a second deep review: fixes a rare burst-promise leak when `requestAnimationFrame` is unavailable; caps source-text length before grapheme segmentation; `symbols` now appear even at a low `particleCount`, drop empty entries, and `confettiText({ symbols })` alone (no `text`) is emoji-only. No API changes.
 

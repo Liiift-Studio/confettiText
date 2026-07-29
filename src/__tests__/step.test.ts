@@ -99,7 +99,7 @@ describe('burst promise + per-burst clear', () => {
 		expect(typeof burst.then).toBe('function')
 		expect(typeof burst.clear).toBe('function')
 		flush(3) // drive both pieces to retirement
-		await expect(burst).resolves.toBeUndefined()
+		await expect(burst).resolves.toBe('completed')
 	})
 
 	it('.clear() cancels only its own burst, leaving others running', () => {
@@ -108,7 +108,27 @@ describe('burst promise + per-burst clear', () => {
 		expect(pieces().length).toBe(7)
 		a.clear()
 		expect(pieces().length).toBe(4) // only burst b's pieces remain
-		expect(document.querySelector(layerSel)).toBeTruthy() // layer stays while b is in flight
+		expect(document.querySelector(layerSel)).toBeTruthy() // burst b's layer stays while it's in flight
+	})
+
+	it('resolves "cleared" when a burst is cancelled, "completed" otherwise', async () => {
+		const cancelled = confettiText({ text: 'x', particleCount: 5, ticks: 200 })
+		flush(1)
+		cancelled.clear()
+		await expect(cancelled).resolves.toBe('cleared')
+
+		const global = confettiText({ text: 'y', particleCount: 5, ticks: 200 })
+		flush(1)
+		clearConfettiText()
+		await expect(global).resolves.toBe('cleared')
+	})
+
+	it('gives each concurrent burst its own layer at its own zIndex', () => {
+		confettiText({ text: 'a', particleCount: 2, ticks: 200, zIndex: 100 })
+		confettiText({ text: 'b', particleCount: 2, ticks: 200, zIndex: 5000 })
+		const layers = Array.from(document.querySelectorAll<HTMLElement>(layerSel))
+		expect(layers.length).toBe(2)
+		expect(layers.map((l) => l.style.zIndex).sort()).toEqual(['100', '5000'])
 	})
 
 	it('a no-op burst (reduced motion) still returns a resolved ConfettiBurst', async () => {
@@ -116,7 +136,7 @@ describe('burst promise + per-burst clear', () => {
 		const burst = confettiText({ text: 'x', particleCount: 5 })
 		expect(pieces().length).toBe(0)
 		expect(typeof burst.clear).toBe('function')
-		await expect(burst).resolves.toBeUndefined()
+		await expect(burst).resolves.toBe('completed')
 		spy.mockRestore()
 	})
 
@@ -125,7 +145,7 @@ describe('burst promise + per-burst clear', () => {
 		const burst = confettiText({ text: 'x', particleCount: 10 })
 		expect(pieces().length).toBe(0)
 		expect(document.querySelector(layerSel)).toBeNull() // no empty layer attached
-		await expect(burst).resolves.toBeUndefined()
+		await expect(burst).resolves.toBe('completed')
 	})
 
 	it('.clear() after a burst already finished is a safe no-op', () => {

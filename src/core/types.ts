@@ -11,6 +11,9 @@ export interface ConfettiOrigin {
 /** When a React `<ConfettiText>` / `useConfettiText` binding fires its burst. */
 export type ConfettiTrigger = 'click' | 'mount' | 'inView' | 'manual'
 
+/** A geometric confetti particle (classic paper-confetti shapes), mixable with the letters. */
+export type ConfettiShape = 'square' | 'circle' | 'strip'
+
 /**
  * Options controlling a confettiText burst. The physics knobs mirror `canvas-confetti`, so the
  * defaults feel familiar; `text`, `colors`, and `weightRange` are the typographic additions.
@@ -29,6 +32,12 @@ export interface ConfettiTextOptions {
 	 * all-emoji burst, e.g. `symbols: ['🎉', '✨', '⭐']`. Emoji/combining sequences are kept whole.
 	 */
 	symbols?: string[]
+	/**
+	 * Geometric particles (classic paper confetti) mixed into the burst alongside the letters —
+	 * `'square'`, `'circle'`, and `'strip'`. Each entry becomes its own particle, coloured from
+	 * `colors` (or `currentColor`). Pair with `text: ''` for a shapes-only burst.
+	 */
+	shapes?: ConfettiShape[]
 	/** How many letter-particles to emit (default: 70). */
 	particleCount?: number
 	/** Launch direction in degrees — 90 points straight up, 0 points right (default: 90). */

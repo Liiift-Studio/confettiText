@@ -8,6 +8,6 @@ export type { ConfettiTextHandle } from './react/useConfettiText'
 export { ConfettiText } from './react/ConfettiText'
 // Re-export the core surface a React consumer is likely to want from one import.
 export { confettiText, attachConfettiText, clearConfettiText } from './core/adjust'
-export type { ConfettiBurst } from './core/adjust'
-export type { ConfettiTextOptions, ReactConfettiTextOptions, ConfettiOrigin, ConfettiTrigger } from './core/types'
+export type { ConfettiBurst, ConfettiResult } from './core/adjust'
+export type { ConfettiTextOptions, ReactConfettiTextOptions, ConfettiOrigin, ConfettiTrigger, ConfettiShape } from './core/types'
 export { CONFETTI_TEXT_CLASSES, DEFAULT_COLORS } from './core/types'

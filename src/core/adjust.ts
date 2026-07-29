@@ -1,12 +1,13 @@
-// confettiText/src/core/adjust.ts — framework-agnostic confetti-of-letters burst engine.
-// Every particle is a real DOM <span> holding one letter of the source text. Kinematics are ported
-// from canvas-confetti (velocity + per-frame decay, constant gravity/drift, wobble, and a
-// scaleY(cos(tilt)) paper-flip tumble) so the burst feels familiar; the letters, colours, and
-// variable-font weight jitter are the typographic layer on top.
-import { CONFETTI_TEXT_CLASSES, DEFAULT_COLORS, type ConfettiTextOptions } from './types'
+// confettiText/src/core/adjust.ts — framework-agnostic confetti burst engine.
+// Every particle is a real DOM element: a <span> holding one letter/emoji of the source text, or a
+// <div> geometric shape. Kinematics are ported from canvas-confetti (velocity + per-frame decay,
+// constant gravity/drift, wobble, and a scaleY(cos(tilt)) paper-flip tumble) so the burst feels
+// familiar; the letters, colours, and variable-font weight jitter are the typographic layer on top.
+// Each burst owns its own fixed layer (so `zIndex` is per-burst) plus its own promise + `.clear()`.
+import { CONFETTI_TEXT_CLASSES, DEFAULT_COLORS, type ConfettiTextOptions, type ConfettiShape } from './types'
 import { makeKeyboardOperable } from './a11y'
 
-/** Base particle font-size in px before `scalar` and per-particle jitter. */
+/** Base particle size in px before `scalar` and per-particle jitter. */
 const BASE_SIZE = 18
 /** Gravity is applied at 2× internally — tuned so the default 1.1 falls right for letter-scale pieces. */
 const GRAVITY_SCALE = 2
@@ -16,6 +17,10 @@ const MAX_PARTICLE_COUNT = 1000
 const MAX_TICKS = 1200
 /** Ceiling on simultaneously-live particles across all bursts — caps rapid-fire spam. */
 const MAX_LIVE_PIECES = 3000
+/** Max source-text length (chars) segmented per burst — bounds Intl.Segmenter work on huge input. */
+const MAX_TEXT_LEN = 4000
+/** Max distinct pool entries — particles cycle, so more than this is never needed. */
+const MAX_POOL = 1000
 
 /** Clamp `n` into [lo, hi]; a non-finite input (NaN/Infinity) resolves to `lo`. */
 function clamp(n: number, lo: number, hi: number): number {
@@ -42,9 +47,9 @@ interface Resolved {
 	disableForReducedMotion: boolean
 }
 
-/** One live letter-particle. */
+/** One live particle (a letter/emoji span or a shape div). */
 interface Piece {
-	el: HTMLSpanElement
+	el: HTMLElement
 	x: number
 	y: number
 	/** Precomputed unit launch direction (cos/sin of the launch angle) — invariant after launch. */
@@ -67,26 +72,28 @@ interface Piece {
 	burstId: number
 }
 
+/** How a finished burst ended: it ran to completion, or was cancelled via `clear()` / `clearConfettiText()`. */
+export type ConfettiResult = 'completed' | 'cleared'
+
 /**
- * A fired burst. It is a `Promise<void>` that resolves once the burst's pieces have all retired
- * (mirroring canvas-confetti's awaitable return), augmented with `clear()` to cancel just this burst
- * — other in-flight bursts keep running (unlike the global {@link clearConfettiText}).
+ * A fired burst. It is a `Promise<ConfettiResult>` that resolves when the burst ends — to `'completed'`
+ * if it ran its course, or `'cleared'` if it was cancelled — augmented with `clear()` to cancel just
+ * this burst (other in-flight bursts keep running, unlike the global {@link clearConfettiText}).
  */
-export type ConfettiBurst = Promise<void> & { clear: () => void }
+export type ConfettiBurst = Promise<ConfettiResult> & { clear: () => void }
 
-// ─── Shared layer + animation loop (one per document) ─────────────────────────
+// ─── Shared particle pool + one animation loop; per-burst layers ──────────────
 
-/** The single fixed layer that holds all live pieces; created lazily, reused across bursts. */
-let _layer: HTMLDivElement | null = null
-/** All live particles across every in-flight burst. */
+/** All live particles across every in-flight burst (one shared rAF loop animates them). */
 let _pieces: Piece[] = []
 /** Handle for the running rAF loop, or 0 when idle. */
 let _raf = 0
 
-/** Per-burst live-count + resolver, keyed by burst id. */
+/** Per-burst live-count, result resolver, and its own fixed layer (so `zIndex` is independent). */
 interface BurstRecord {
 	live: number
-	resolve: () => void
+	resolve: (result: ConfettiResult) => void
+	layer: HTMLElement
 }
 const _bursts = new Map<number, BurstRecord>()
 let _burstSeq = 0
@@ -94,27 +101,23 @@ let _burstSeq = 0
 /** Wrap a promise + clear fn into a ConfettiBurst. `.clear` lives only on this object — chaining
  *  (`.then()`/`.catch()`) returns a plain Promise without it; after the burst resolves, `.clear()` is
  *  a no-op. */
-function makeBurst(promise: Promise<void>, clear: () => void): ConfettiBurst {
+function makeBurst(promise: Promise<ConfettiResult>, clear: () => void): ConfettiBurst {
 	return Object.assign(promise, { clear })
 }
 
 /** An already-finished burst — for no-op paths (SSR, reduced motion, zero particles, no rAF). */
 function resolvedBurst(): ConfettiBurst {
-	return makeBurst(Promise.resolve(), () => {})
+	return makeBurst(Promise.resolve('completed'), () => {})
 }
 
-/** When no pieces remain, cancel the loop and detach the layer. The single teardown invariant. */
-function teardownIfIdle(): void {
+/** Cancel the shared rAF loop once no pieces remain. Per-burst layers are removed as each burst ends. */
+function stopLoopIfIdle(): void {
 	if (_pieces.length) return
 	if (_raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(_raf)
 	_raf = 0
-	if (_layer) {
-		_layer.remove()
-		_layer = null
-	}
 }
 
-/** Retire just one burst's pieces and resolve it, leaving any other bursts running. */
+/** Retire just one burst's pieces + layer and resolve it 'cleared', leaving other bursts running. */
 function clearBurst(id: number): void {
 	for (let i = _pieces.length - 1; i >= 0; i--) {
 		if (_pieces[i].burstId === id) {
@@ -124,10 +127,11 @@ function clearBurst(id: number): void {
 	}
 	const b = _bursts.get(id)
 	if (b) {
-		b.resolve()
+		b.layer.remove()
+		b.resolve('cleared')
 		_bursts.delete(id)
 	}
-	teardownIfIdle() // tear down only if that was the last live burst
+	stopLoopIfIdle()
 }
 
 /** True when the user has asked the OS to reduce motion. */
@@ -162,12 +166,8 @@ function resolve(options: ConfettiTextOptions): Resolved {
 	}
 }
 
-/** Ensure the fixed confetti layer exists and is attached; return it. */
-function ensureLayer(zIndex: number): HTMLDivElement {
-	if (_layer && _layer.isConnected) {
-		_layer.style.zIndex = String(zIndex)
-		return _layer
-	}
+/** Create a fresh fixed, aria-hidden, non-interactive layer for one burst at its own `zIndex`. */
+function createLayer(zIndex: number): HTMLElement {
 	const layer = document.createElement('div')
 	layer.className = CONFETTI_TEXT_CLASSES.layer
 	layer.setAttribute('aria-hidden', 'true')
@@ -182,14 +182,8 @@ function ensureLayer(zIndex: number): HTMLDivElement {
 		zIndex: String(zIndex),
 	})
 	document.body.appendChild(layer)
-	_layer = layer
 	return layer
 }
-
-/** Max source-text length (chars) segmented per burst — bounds Intl.Segmenter work on huge input. */
-const MAX_TEXT_LEN = 4000
-/** Max distinct glyphs in the pool — particles cycle, so more than this is never needed. */
-const MAX_POOL = 1000
 
 /** Lazily-created shared grapheme segmenter: `undefined` = not tried, `null` = unavailable. */
 let _segmenter: { segment(s: string): Iterable<{ segment: string }> } | null | undefined
@@ -212,25 +206,29 @@ function segmentGraphemes(s: string): string[] {
 	return seg ? Array.from(seg.segment(s), (x) => x.segment) : Array.from(s)
 }
 
+/** A pool entry: a glyph (letter/emoji, `g`) or a geometric shape (`s`). */
+type PoolItem = { g: string } | { s: ConfettiShape }
+
 /**
- * Build the particle glyph pool: `symbols` first (so they always appear even at a low `particleCount`),
- * then the grapheme-split, whitespace-stripped letters of `text`. Empty `symbols` entries are dropped;
- * the source text is length-capped before segmenting, and the pool is capped, to bound work. Falls back
- * to a single sparkle if empty.
+ * Build the particle pool: shapes and `symbols` first (so they always appear even at a low
+ * `particleCount`), then the grapheme-split, whitespace-stripped letters of `text`. Empty `symbols`
+ * entries are dropped; the source text is length-capped before segmenting, and the pool is capped, to
+ * bound work. Falls back to a single sparkle if empty.
  */
-function toGlyphs(text: string, symbols?: string[]): string[] {
-	const letters = segmentGraphemes(text.replace(/\s+/g, '').slice(0, MAX_TEXT_LEN))
-	const extra = symbols ? symbols.filter(Boolean) : []
-	let pool = extra.length ? [...extra, ...letters] : letters
+function toPool(text: string, symbols?: string[], shapes?: ConfettiShape[]): PoolItem[] {
+	const letters: PoolItem[] = segmentGraphemes(text.replace(/\s+/g, '').slice(0, MAX_TEXT_LEN)).map((g) => ({ g }))
+	const sym: PoolItem[] = (symbols ? symbols.filter(Boolean) : []).map((g) => ({ g }))
+	const shp: PoolItem[] = (shapes ?? []).map((s) => ({ s }))
+	let pool: PoolItem[] = [...shp, ...sym, ...letters]
 	if (pool.length > MAX_POOL) pool = pool.slice(0, MAX_POOL)
-	return pool.length ? pool : ['✦']
+	return pool.length ? pool : [{ g: '✦' }]
 }
 
-/** Emit a burst of letter-particles from an absolute viewport point (px); return its ConfettiBurst. */
-function fireAt(originX: number, originY: number, glyphs: string[], o: Resolved): ConfettiBurst {
+/** Emit a burst of particles from an absolute viewport point (px); return its ConfettiBurst. */
+function fireAt(originX: number, originY: number, pool: PoolItem[], o: Resolved): ConfettiBurst {
 	const burstId = ++_burstSeq
-	let resolveFn: () => void = () => {}
-	const promise = new Promise<void>((res) => {
+	let resolveFn: (result: ConfettiResult) => void = () => {}
+	const promise = new Promise<ConfettiResult>((res) => {
 		resolveFn = res
 	})
 	const burst = makeBurst(promise, () => clearBurst(burstId))
@@ -240,34 +238,51 @@ function fireAt(originX: number, originY: number, glyphs: string[], o: Resolved)
 	// Nothing to spawn (zero count / cap full), or no rAF to animate with → finish immediately.
 	// Guarding here means we never attach an empty layer or leave a burst promise pending.
 	if (count <= 0 || typeof requestAnimationFrame !== 'function') {
-		resolveFn()
+		resolveFn('completed')
 		return burst
 	}
 
-	const layer = ensureLayer(o.zIndex)
+	const layer = createLayer(o.zIndex)
 	const radAngle = (o.angle * Math.PI) / 180
 	const radSpread = (o.spread * Math.PI) / 180
 	const frag = document.createDocumentFragment()
 
 	for (let i = 0; i < count; i++) {
-		const el = document.createElement('span')
-		el.className = CONFETTI_TEXT_CLASSES.piece
-		el.textContent = glyphs[i % glyphs.length]
+		const item = pool[i % pool.length]
 		const size = BASE_SIZE * o.scalar * (0.75 + Math.random() * 0.6)
+		const color = o.colors ? o.colors[(Math.random() * o.colors.length) | 0] : null
+
+		let el: HTMLElement
+		if ('g' in item) {
+			// Letter / emoji particle.
+			const span = document.createElement('span')
+			span.textContent = item.g
+			span.style.fontSize = `${size.toFixed(1)}px`
+			span.style.lineHeight = '1'
+			if (o.fontFamily) span.style.fontFamily = o.fontFamily
+			if (color) span.style.color = color
+			if (o.weightRange) {
+				const [wa, wb] = o.weightRange
+				const w = Math.round(wa + Math.random() * (wb - wa))
+				span.style.fontVariationSettings = `"wght" ${w}`
+				span.style.fontWeight = String(w) // fallback for non-variable fonts
+			}
+			el = span
+		} else {
+			// Geometric shape particle (classic paper confetti).
+			const div = document.createElement('div')
+			div.style.width = `${size.toFixed(1)}px`
+			div.style.height = `${(item.s === 'strip' ? size * 0.45 : size).toFixed(1)}px`
+			div.style.background = color ?? 'currentColor'
+			if (item.s === 'circle') div.style.borderRadius = '50%'
+			else if (item.s === 'strip') div.style.borderRadius = '1px'
+			el = div
+		}
+		el.className = CONFETTI_TEXT_CLASSES.piece
 		el.style.position = 'absolute'
 		el.style.top = '0'
 		el.style.left = '0'
-		el.style.fontSize = `${size.toFixed(1)}px`
-		el.style.lineHeight = '1'
 		el.style.userSelect = 'none'
-		if (o.fontFamily) el.style.fontFamily = o.fontFamily
-		if (o.colors) el.style.color = o.colors[(Math.random() * o.colors.length) | 0]
-		if (o.weightRange) {
-			const [wa, wb] = o.weightRange
-			const w = Math.round(wa + Math.random() * (wb - wa))
-			el.style.fontVariationSettings = `"wght" ${w}`
-			el.style.fontWeight = String(w) // fallback for non-variable fonts
-		}
 		frag.appendChild(el)
 
 		// -radAngle so 90° points up (screen +y is down); jitter within the spread cone.
@@ -296,7 +311,7 @@ function fireAt(originX: number, originY: number, glyphs: string[], o: Resolved)
 	layer.appendChild(frag)
 
 	// Register the burst so step() can resolve it once its pieces retire (count > 0 guaranteed above).
-	_bursts.set(burstId, { live: count, resolve: resolveFn })
+	_bursts.set(burstId, { live: count, resolve: resolveFn, layer })
 	if (!_raf) _raf = requestAnimationFrame(step)
 
 	return burst
@@ -329,7 +344,8 @@ function step(): void {
 			_pieces.splice(i, 1)
 			const b = _bursts.get(p.burstId)
 			if (b && --b.live <= 0) {
-				b.resolve()
+				b.layer.remove() // this burst's last piece retired — detach its layer
+				b.resolve('completed')
 				_bursts.delete(p.burstId)
 			}
 		}
@@ -338,21 +354,21 @@ function step(): void {
 		_raf = requestAnimationFrame(step)
 	} else {
 		_raf = 0
-		teardownIfIdle() // no pieces left — detach the empty layer
 	}
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Fire a one-shot confetti burst made of the letters of `options.text`. Origin is a viewport
- * fraction (default centre). Safe to call repeatedly — bursts share one layer and animation loop.
- * No-op during SSR or (by default) when the user prefers reduced motion.
+ * Fire a one-shot confetti burst made of the letters of `options.text` (plus any `symbols`/`shapes`).
+ * Origin is a viewport fraction (default centre). Safe to call repeatedly — each burst gets its own
+ * layer and shares one animation loop. No-op during SSR or (by default) when the user prefers reduced
+ * motion.
  *
- * Returns a {@link ConfettiBurst}: a `Promise<void>` that resolves when this burst finishes, with a
- * `.clear()` method to cancel just this burst.
+ * Returns a {@link ConfettiBurst}: a `Promise<ConfettiResult>` that resolves `'completed'` when the
+ * burst finishes or `'cleared'` if cancelled, with a `.clear()` to cancel just this burst.
  *
- * @example await confettiText({ text: 'Hooray', particleCount: 120, spread: 90 })
+ * @example const how = await confettiText({ text: 'Hooray', particleCount: 120 }) // 'completed' | 'cleared'
  * @example const burst = confettiText({ text: 'Yay' }); burst.clear() // cancel only this one
  */
 export function confettiText(options: ConfettiTextOptions = {}): ConfettiBurst {
@@ -361,9 +377,10 @@ export function confettiText(options: ConfettiTextOptions = {}): ConfettiBurst {
 	if (o.disableForReducedMotion && prefersReducedMotion()) return resolvedBurst()
 	const originX = (options.origin?.x ?? 0.5) * window.innerWidth
 	const originY = (options.origin?.y ?? 0.5) * window.innerHeight
-	// If only `symbols` are given (no text), don't inject the 'Yay' default — make it symbols-only.
-	const text = options.text ?? (options.symbols?.length ? '' : 'Yay')
-	return fireAt(originX, originY, toGlyphs(text, options.symbols), o)
+	// If only symbols/shapes are given (no text), don't inject the 'Yay' default.
+	const hasExtras = !!(options.symbols?.length || options.shapes?.length)
+	const text = options.text ?? (hasExtras ? '' : 'Yay')
+	return fireAt(originX, originY, toPool(text, options.symbols, options.shapes), o)
 }
 
 /**
@@ -384,8 +401,8 @@ export function attachConfettiText(element: HTMLElement, options: ConfettiTextOp
 			o.fontFamily = getComputedStyle(element).fontFamily || null
 		}
 		const rect = element.getBoundingClientRect()
-		const glyphs = toGlyphs(options.text ?? element.textContent ?? 'Yay', options.symbols)
-		fireAt(rect.left + rect.width / 2, rect.top + rect.height / 2, glyphs, o)
+		const pool = toPool(options.text ?? element.textContent ?? 'Yay', options.symbols, options.shapes)
+		fireAt(rect.left + rect.width / 2, rect.top + rect.height / 2, pool, o)
 	}
 
 	const onClick = (): void => fire()
@@ -399,14 +416,23 @@ export function attachConfettiText(element: HTMLElement, options: ConfettiTextOp
 }
 
 /**
- * Immediately remove every live particle across ALL bursts, cancel the loop, detach the layer, and
- * resolve every pending burst promise. To cancel a single burst instead, use the `.clear()` on the
- * {@link ConfettiBurst} that `confettiText()` returned.
+ * Immediately remove every live particle across ALL bursts, cancel the loop, detach every burst's
+ * layer, and resolve every pending burst `'cleared'`. To cancel a single burst instead, use the
+ * `.clear()` on the {@link ConfettiBurst} that `confettiText()` returned.
  */
 export function clearConfettiText(): void {
 	for (const p of _pieces) p.el.remove()
 	_pieces = []
-	for (const b of _bursts.values()) b.resolve()
+	for (const b of _bursts.values()) {
+		b.layer.remove()
+		b.resolve('cleared')
+	}
 	_bursts.clear()
-	teardownIfIdle() // _pieces is now empty, so this cancels the loop + detaches the layer
+	stopLoopIfIdle()
 }
+
+// Dev-only: on hot-module replacement, clear in-flight confetti so the swapped-out module instance
+// doesn't leave an orphaned layer/loop running. `import.meta.hot` is undefined in production builds,
+// so this is a no-op for consumers.
+const _hot = (import.meta as ImportMeta & { hot?: { dispose(cb: () => void): void } }).hot
+if (_hot) _hot.dispose(() => clearConfettiText())
