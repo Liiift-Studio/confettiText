@@ -9,6 +9,17 @@ import { CONFETTI_TEXT_CLASSES, DEFAULT_COLORS, type ConfettiTextOptions } from 
 const BASE_SIZE = 18
 /** Gravity is applied at 2× internally — tuned so the default 1.1 falls right for letter-scale pieces. */
 const GRAVITY_SCALE = 2
+/** Ceiling on a single burst's particle count — a stray huge value can't freeze the tab. */
+const MAX_PARTICLE_COUNT = 1000
+/** Ceiling on particle lifetime in frames. */
+const MAX_TICKS = 1200
+/** Ceiling on simultaneously-live particles across all bursts — caps rapid-fire spam. */
+const MAX_LIVE_PIECES = 3000
+
+/** Clamp `n` into [lo, hi]. */
+function clamp(n: number, lo: number, hi: number): number {
+	return n < lo ? lo : n > hi ? hi : n
+}
 
 /** Fully-resolved options with every default filled in. */
 interface Resolved {
@@ -34,8 +45,9 @@ interface Piece {
 	el: HTMLSpanElement
 	x: number
 	y: number
-	/** Launch direction in radians (screen space: +y is down). */
-	angle2D: number
+	/** Precomputed unit launch direction (cos/sin of the launch angle) — invariant after launch. */
+	dirX: number
+	dirY: number
 	velocity: number
 	wobble: number
 	wobbleSpeed: number
@@ -73,14 +85,14 @@ function prefersReducedMotion(): boolean {
 function resolve(options: ConfettiTextOptions): Resolved {
 	const rawColors = options.colors
 	return {
-		particleCount: options.particleCount ?? 70,
+		particleCount: clamp(Math.floor(options.particleCount ?? 70), 0, MAX_PARTICLE_COUNT),
 		angle: options.angle ?? 90,
 		spread: options.spread ?? 62,
 		startVelocity: options.startVelocity ?? 34,
 		decay: options.decay ?? 0.9,
 		gravity: options.gravity ?? 1.1,
 		drift: options.drift ?? 0,
-		ticks: options.ticks ?? 200,
+		ticks: clamp(Math.floor(options.ticks ?? 200), 1, MAX_TICKS),
 		scalar: options.scalar ?? 1,
 		// undefined → festive default; null/empty → uncoloured (inherit currentColor)
 		colors: rawColors === undefined ? DEFAULT_COLORS : rawColors && rawColors.length ? rawColors : null,
@@ -127,8 +139,11 @@ function fireAt(originX: number, originY: number, letters: string[], o: Resolved
 	const layer = ensureLayer(o.zIndex)
 	const radAngle = (o.angle * Math.PI) / 180
 	const radSpread = (o.spread * Math.PI) / 180
+	// Respect the global live-particle cap so rapid repeated bursts can't stack unbounded work.
+	const count = Math.min(o.particleCount, Math.max(0, MAX_LIVE_PIECES - _pieces.length))
+	const frag = document.createDocumentFragment()
 
-	for (let i = 0; i < o.particleCount; i++) {
+	for (let i = 0; i < count; i++) {
 		const el = document.createElement('span')
 		el.className = CONFETTI_TEXT_CLASSES.piece
 		el.textContent = letters[i % letters.length]
@@ -138,7 +153,6 @@ function fireAt(originX: number, originY: number, letters: string[], o: Resolved
 		el.style.left = '0'
 		el.style.fontSize = `${size.toFixed(1)}px`
 		el.style.lineHeight = '1'
-		el.style.willChange = 'transform, opacity'
 		el.style.userSelect = 'none'
 		if (o.fontFamily) el.style.fontFamily = o.fontFamily
 		if (o.colors) el.style.color = o.colors[(Math.random() * o.colors.length) | 0]
@@ -148,14 +162,16 @@ function fireAt(originX: number, originY: number, letters: string[], o: Resolved
 			el.style.fontVariationSettings = `"wght" ${w}`
 			el.style.fontWeight = String(w) // fallback for non-variable fonts
 		}
-		layer.appendChild(el)
+		frag.appendChild(el)
 
+		// -radAngle so 90° points up (screen +y is down); jitter within the spread cone.
+		const a2d = -radAngle + (0.5 * radSpread - Math.random() * radSpread)
 		_pieces.push({
 			el,
 			x: originX,
 			y: originY,
-			// -radAngle so 90° points up (screen +y is down); jitter within the spread cone.
-			angle2D: -radAngle + (0.5 * radSpread - Math.random() * radSpread),
+			dirX: Math.cos(a2d),
+			dirY: Math.sin(a2d),
 			velocity: o.startVelocity * (0.5 + Math.random()),
 			wobble: Math.random() * 10,
 			wobbleSpeed: 0.05 + Math.random() * 0.06,
@@ -170,6 +186,7 @@ function fireAt(originX: number, originY: number, letters: string[], o: Resolved
 			flat: o.flat,
 		})
 	}
+	layer.appendChild(frag)
 
 	if (!_raf && typeof requestAnimationFrame === 'function') {
 		_raf = requestAnimationFrame(step)
@@ -179,10 +196,11 @@ function fireAt(originX: number, originY: number, letters: string[], o: Resolved
 /** Advance every live particle one frame; retire spent or off-screen ones. */
 function step(): void {
 	const viewportH = typeof window !== 'undefined' ? window.innerHeight : 0
+	const viewportW = typeof window !== 'undefined' ? window.innerWidth : 0
 	for (let i = _pieces.length - 1; i >= 0; i--) {
 		const p = _pieces[i]
-		p.x += Math.cos(p.angle2D) * p.velocity + p.drift
-		p.y += Math.sin(p.angle2D) * p.velocity + p.gravity * GRAVITY_SCALE
+		p.x += p.dirX * p.velocity + p.drift
+		p.y += p.dirY * p.velocity + p.gravity * GRAVITY_SCALE
 		p.velocity *= p.decay
 		p.wobble += p.wobbleSpeed
 		p.tilt += p.tiltSpeed
@@ -195,7 +213,9 @@ function step(): void {
 			p.tilt * p.spin
 		).toFixed(1)}deg) scaleY(${scaleY.toFixed(3)})`
 		p.tick++
-		if (p.tick >= p.totalTicks || wy > viewportH + 80) {
+		// Retire when spent, fallen past the bottom, or drifted off either side. (Not the top — gravity
+		// can still carry an upward-launched piece back into view.)
+		if (p.tick >= p.totalTicks || wy > viewportH + 80 || wx < -120 || wx > viewportW + 120) {
 			p.el.remove()
 			_pieces.splice(i, 1)
 		}
@@ -204,6 +224,11 @@ function step(): void {
 		_raf = requestAnimationFrame(step)
 	} else {
 		_raf = 0
+		// No pieces left — don't leave an empty full-viewport layer attached to <body>.
+		if (_layer) {
+			_layer.remove()
+			_layer = null
+		}
 	}
 }
 
@@ -217,7 +242,7 @@ function step(): void {
  * @example confettiText({ text: 'Hooray', particleCount: 120, spread: 90 })
  */
 export function confettiText(options: ConfettiTextOptions = {}): void {
-	if (typeof document === 'undefined') return
+	if (typeof document === 'undefined' || !document.body) return
 	const o = resolve(options)
 	if (o.disableForReducedMotion && prefersReducedMotion()) return
 	const originX = (options.origin?.x ?? 0.5) * window.innerWidth
@@ -231,17 +256,58 @@ export function confettiText(options: ConfettiTextOptions = {}): void {
  *
  * @example const detach = attachConfettiText(document.querySelector('h1')!)
  */
+/** Tags that are focusable and fire `click` on Enter/Space natively — no keyboard shim needed. */
+const NATIVE_INTERACTIVE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'])
+
 export function attachConfettiText(element: HTMLElement, options: ConfettiTextOptions = {}): () => void {
 	if (typeof document === 'undefined') return () => {}
-	const handler = (): void => {
+
+	const fire = (): void => {
+		if (!document.body) return
 		const o = resolve(options)
 		if (o.disableForReducedMotion && prefersReducedMotion()) return
+		// Inherit the element's own font so the burst matches the text it came from (unless overridden).
+		if (!o.fontFamily && typeof getComputedStyle === 'function') {
+			o.fontFamily = getComputedStyle(element).fontFamily || null
+		}
 		const rect = element.getBoundingClientRect()
 		const letters = toLetters(options.text ?? element.textContent ?? 'Yay')
 		fireAt(rect.left + rect.width / 2, rect.top + rect.height / 2, letters, o)
 	}
-	element.addEventListener('click', handler)
-	return () => element.removeEventListener('click', handler)
+
+	const onClick = (): void => fire()
+	const onKey = (e: KeyboardEvent): void => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault()
+			fire()
+		}
+	}
+	element.addEventListener('click', onClick)
+
+	// Keyboard operability: if the element isn't natively interactive, make it focusable + Enter/Space-able.
+	const shim = !NATIVE_INTERACTIVE.has(element.tagName)
+	let addedTabIndex = false
+	let addedRole = false
+	if (shim) {
+		element.addEventListener('keydown', onKey)
+		if (!element.hasAttribute('tabindex')) {
+			element.tabIndex = 0
+			addedTabIndex = true
+		}
+		if (!element.hasAttribute('role')) {
+			element.setAttribute('role', 'button')
+			addedRole = true
+		}
+	}
+
+	return () => {
+		element.removeEventListener('click', onClick)
+		if (shim) {
+			element.removeEventListener('keydown', onKey)
+			if (addedTabIndex) element.removeAttribute('tabindex')
+			if (addedRole) element.removeAttribute('role')
+		}
+	}
 }
 
 /** Immediately remove every live particle, cancel the loop, and detach the layer. */

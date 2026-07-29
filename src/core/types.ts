@@ -3,9 +3,9 @@
 /** Burst origin as a fraction of the viewport (0,0 = top-left · 1,1 = bottom-right). */
 export interface ConfettiOrigin {
 	/** Horizontal position, 0..1 across the viewport width (default 0.5). */
-	x: number
+	x?: number
 	/** Vertical position, 0..1 down the viewport height (default 0.5). */
-	y: number
+	y?: number
 }
 
 /** When a React `<ConfettiText>` / `useConfettiText` binding fires its burst. */
@@ -48,7 +48,7 @@ export interface ConfettiTextOptions {
 	 * letters uncoloured so they inherit `currentColor` — the monochrome, on-brand look.
 	 * (default: the festive DEFAULT_COLORS palette)
 	 */
-	colors?: string[] | null
+	colors?: readonly string[] | null
 	/**
 	 * `[min, max]` variable-font weight; each particle is assigned a random `wght` in this range as
 	 * it launches, so the burst has typographic texture. Requires a variable font on the page (it
@@ -63,10 +63,15 @@ export interface ConfettiTextOptions {
 	zIndex?: number
 	/** Skip the burst entirely when the user prefers reduced motion (default: true). */
 	disableForReducedMotion?: boolean
-	/**
-	 * React-only: when the `useConfettiText` / `<ConfettiText>` binding fires.
-	 * Ignored by the imperative `confettiText()` core. (default: 'click')
-	 */
+}
+
+/**
+ * Options for the React bindings (`useConfettiText` / `<ConfettiText>`): every core burst option
+ * plus `trigger`. `trigger` is React-only, so it lives here rather than polluting the
+ * framework-agnostic {@link ConfettiTextOptions} consumed by the imperative core and the Webflow build.
+ */
+export interface ReactConfettiTextOptions extends ConfettiTextOptions {
+	/** When the binding fires its burst (default: 'click'). */
 	trigger?: ConfettiTrigger
 }
 

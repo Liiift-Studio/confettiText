@@ -1,9 +1,9 @@
 // confettiText/src/react/ConfettiText.tsx — drop-in component that bursts its children into confetti.
 import React, { forwardRef, useCallback } from 'react'
 import { useConfettiText } from './useConfettiText'
-import type { ConfettiTextOptions } from '../core/types'
+import type { ReactConfettiTextOptions } from '../core/types'
 
-interface ConfettiTextProps extends ConfettiTextOptions {
+interface ConfettiTextProps extends ReactConfettiTextOptions {
 	children: React.ReactNode
 	className?: string
 	style?: React.CSSProperties

@@ -4,7 +4,10 @@
 // manual (call `fire()` yourself).
 import { useCallback, useEffect, useRef } from 'react'
 import { confettiText } from '../core/adjust'
-import type { ConfettiTextOptions } from '../core/types'
+import type { ConfettiTextOptions, ReactConfettiTextOptions } from '../core/types'
+
+/** Tags that fire `click` on Enter/Space natively — no keyboard shim needed. */
+const NATIVE_INTERACTIVE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY'])
 
 /** What `useConfettiText` returns. */
 export interface ConfettiTextHandle {
@@ -17,10 +20,12 @@ export interface ConfettiTextHandle {
 /**
  * React hook wrapping {@link confettiText}. The burst originates from the ref'd element and, unless
  * `text` is given, is made of that element's text. Respects `prefers-reduced-motion` via the core.
+ * For the default `click` trigger the ref'd element is made keyboard-operable (focusable + Enter/Space)
+ * unless it is already a natively interactive element.
  *
  * @param options - burst options plus a React-only `trigger` ('click' | 'mount' | 'inView' | 'manual')
  */
-export function useConfettiText(options: ConfettiTextOptions = {}): ConfettiTextHandle {
+export function useConfettiText(options: ReactConfettiTextOptions = {}): ConfettiTextHandle {
 	const ref = useRef<HTMLElement | null>(null)
 	const optionsRef = useRef(options)
 	optionsRef.current = options
@@ -33,6 +38,8 @@ export function useConfettiText(options: ConfettiTextOptions = {}): ConfettiText
 			confettiText({
 				...opts,
 				text: opts.text ?? el.textContent ?? undefined,
+				// Inherit the element's own font so the burst matches the text it came from.
+				fontFamily: opts.fontFamily ?? (typeof getComputedStyle === 'function' ? getComputedStyle(el).fontFamily : undefined),
 				origin: {
 					x: (rect.left + rect.width / 2) / window.innerWidth,
 					y: (rect.top + rect.height / 2) / window.innerHeight,
@@ -72,10 +79,39 @@ export function useConfettiText(options: ConfettiTextOptions = {}): ConfettiText
 			return () => io.disconnect()
 		}
 
-		// 'click'
-		const handler = (): void => fire()
-		el.addEventListener('click', handler)
-		return () => el.removeEventListener('click', handler)
+		// 'click' — plus keyboard operability for non-interactive elements (WCAG 2.1.1).
+		const onClick = (): void => fire()
+		const onKey = (e: KeyboardEvent): void => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault()
+				fire()
+			}
+		}
+		el.addEventListener('click', onClick)
+
+		const shim = !NATIVE_INTERACTIVE.has(el.tagName)
+		let addedTabIndex = false
+		let addedRole = false
+		if (shim) {
+			el.addEventListener('keydown', onKey)
+			if (!el.hasAttribute('tabindex')) {
+				el.tabIndex = 0
+				addedTabIndex = true
+			}
+			if (!el.hasAttribute('role')) {
+				el.setAttribute('role', 'button')
+				addedRole = true
+			}
+		}
+
+		return () => {
+			el.removeEventListener('click', onClick)
+			if (shim) {
+				el.removeEventListener('keydown', onKey)
+				if (addedTabIndex) el.removeAttribute('tabindex')
+				if (addedRole) el.removeAttribute('role')
+			}
+		}
 	}, [trigger, fire])
 
 	return { ref, fire }

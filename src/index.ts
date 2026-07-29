@@ -3,5 +3,5 @@ export { confettiText, attachConfettiText, clearConfettiText } from './core/adju
 export { useConfettiText } from './react/useConfettiText'
 export type { ConfettiTextHandle } from './react/useConfettiText'
 export { ConfettiText } from './react/ConfettiText'
-export type { ConfettiTextOptions, ConfettiOrigin, ConfettiTrigger } from './core/types'
+export type { ConfettiTextOptions, ReactConfettiTextOptions, ConfettiOrigin, ConfettiTrigger } from './core/types'
 export { CONFETTI_TEXT_CLASSES, DEFAULT_COLORS } from './core/types'
