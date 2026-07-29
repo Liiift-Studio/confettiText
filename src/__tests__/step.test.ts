@@ -85,4 +85,10 @@ describe('resolve() clamps (self-DoS guard)', () => {
 		expect(pieces().length).toBeLessThanOrEqual(1000)
 		expect(pieces().length).toBeGreaterThan(0)
 	})
+
+	it('sanitizes non-finite counts without crashing', () => {
+		expect(() => confettiText({ text: 'x', particleCount: NaN, ticks: NaN })).not.toThrow()
+		expect(pieces().length).toBe(0)
+		expect(() => confettiText({ text: 'x', particleCount: Infinity, ticks: 5 })).not.toThrow()
+	})
 })

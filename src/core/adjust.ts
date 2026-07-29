@@ -16,8 +16,9 @@ const MAX_TICKS = 1200
 /** Ceiling on simultaneously-live particles across all bursts — caps rapid-fire spam. */
 const MAX_LIVE_PIECES = 3000
 
-/** Clamp `n` into [lo, hi]. */
+/** Clamp `n` into [lo, hi]; a non-finite input (NaN/Infinity) resolves to `lo`. */
 function clamp(n: number, lo: number, hi: number): number {
+	if (!Number.isFinite(n)) return lo
 	return n < lo ? lo : n > hi ? hi : n
 }
 
