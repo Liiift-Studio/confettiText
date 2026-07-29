@@ -12,7 +12,7 @@ A confetti cannon where every particle is a **real letter of your text** — not
 - **Familiar physics** — `particleCount`, `spread`, `angle`, `startVelocity`, `gravity`, `drift`, `decay`, `ticks`, `scalar`, `origin` behave just like canvas-confetti.
 - **Typographic flourish** — per-particle `wght` jitter via `weightRange`, and a festive `colors` palette (or monochrome `currentColor`).
 - **Zero dependencies**, framework-agnostic (vanilla core + optional React bindings), TypeScript-first.
-- **Accessible** — the confetti layer is `aria-hidden`; bursts are skipped under `prefers-reduced-motion` by default.
+- **Accessible** — the confetti layer is `aria-hidden`; bursts are skipped under `prefers-reduced-motion` by default; and the click trigger is **keyboard-operable** (focus + Enter/Space) when applied to a non-interactive element.
 
 ## Install
 
@@ -43,7 +43,7 @@ const { ref, fire } = useConfettiText({ particleCount: 90 })
 <button onClick={() => fire()}>Celebrate</button>
 ```
 
-The component/hook set `origin` from the element's on-screen position automatically, and use the element's own text unless you pass `text`. Switch timing with `trigger`: `'click'` (default), `'mount'`, `'inView'`, or `'manual'`.
+The component/hook set `origin` from the element's on-screen position automatically, use the element's own text unless you pass `text`, and render the pieces in that element's font. For the default `'click'` trigger, a non-interactive element (e.g. the `<h1>` above) is made keyboard-operable — it gets `tabindex="0"`, `role="button"`, and fires on Enter/Space (native controls like `<button>` are left alone). Switch timing with `trigger`: `'click'` (default), `'mount'`, `'inView'`, or `'manual'`.
 
 ### Vanilla JS
 
@@ -76,7 +76,7 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 
 | Option | Default | Description |
 |---|---|---|
-| `text` | element text | The word/phrase whose letters become confetti. Whitespace stripped; letters cycle through the pieces. |
+| `text` | see note | The word/phrase whose letters become confetti. Whitespace stripped; letters cycle through the pieces. Defaults to the bound element's text for `attachConfettiText`/the React bindings; a bare `confettiText()` with no `text` uses `'Yay'`. Text that strips to empty falls back to a single `✦`. |
 | `particleCount` | `70` | How many letter-particles to emit. |
 | `angle` | `90` | Launch direction in degrees — 90 = straight up, 0 = right. |
 | `spread` | `62` | Angular spread of the burst in degrees. |
@@ -86,28 +86,51 @@ Every option is optional. Physics defaults mirror canvas-confetti.
 | `drift` | `0` | Constant horizontal bias; negative drifts left. |
 | `ticks` | `200` | Particle lifetime in frames before it fades out. |
 | `scalar` | `1` | Letter-size multiplier on the base ~18px particle size. |
-| `origin` | `{ x: 0.5, y: 0.5 }` | Burst origin as viewport fractions. React bindings set this automatically. |
-| `colors` | festive palette | Palette letters are randomly coloured from. Pass `null` for `currentColor` (monochrome). |
-| `weightRange` | `[400, 700]` | Variable-font `wght` jitter per particle. Pass `null` to disable. |
-| `fontFamily` | inherits | Font family for the particles. |
-| `flat` | `false` | Disable the 3D paper-flip tumble. |
+| `origin` | `{ x: 0.5, y: 0.5 }` | Burst origin as viewport fractions; `x` and `y` are each optional and default to `0.5` (so `origin: { y: 0.7 }` works). React bindings set this automatically. |
+| `colors` | festive palette | Palette letters are randomly coloured from (accepts a `readonly` array). Pass `null` **or `[]`** to leave letters `currentColor` (monochrome). |
+| `weightRange` | `[400, 700]` | `[min, max]` variable-font `wght` jitter per particle. Requires a variable font on the page; also sets `font-weight` as a fallback for static fonts. Pass `null` to disable. |
+| `fontFamily` | inherits | Font family for the particles. Element-fired bursts default to the source element's computed font. |
+| `flat` | `false` | Disable the 3D paper-flip tumble (letters still rotate). |
 | `zIndex` | `9999` | z-index of the fixed confetti layer. |
 | `disableForReducedMotion` | `true` | Skip the burst when the user prefers reduced motion. |
-| `trigger` | `'click'` | React-only: `'click'` \| `'mount'` \| `'inView'` \| `'manual'`. |
+| `trigger` | `'click'` | **React-only** (on `ReactConfettiTextOptions`): `'click'` \| `'mount'` \| `'inView'` \| `'manual'`. The vanilla core ignores it. |
 
 ## API
 
 - `confettiText(options?)` — fire a one-shot burst (viewport-fraction `origin`).
 - `attachConfettiText(element, options?)` → `() => void` — click-to-burst from an element's text/position; returns a detach fn.
 - `clearConfettiText()` — remove every live particle, cancel the loop, detach the layer.
-- `useConfettiText(options?)` → `{ ref, fire }` — React binding.
-- `<ConfettiText as="span" …>children</ConfettiText>` — React component.
+- `useConfettiText(options?)` → `{ ref, fire }` — React binding. `ref` attaches to the source element; `fire(overrides?)` triggers a burst imperatively.
+- `<ConfettiText as="span" …>children</ConfettiText>` — React component. Renders `children` as the source text and, beyond the burst options, accepts `as` (default `'span'`), `className`, `style`, `aria-label`, and `role`.
 - `CONFETTI_TEXT_CLASSES` — `{ layer: 'ct-layer', piece: 'ct-piece' }` for targeting the generated markup.
 - `DEFAULT_COLORS` — the festive palette used when `colors` is unspecified.
 
+### Exported types
+
+`ConfettiTextOptions` (the core burst options), `ReactConfettiTextOptions` (`extends ConfettiTextOptions` with `trigger` — used by the hook/component), `ConfettiOrigin` (`{ x?, y? }`), `ConfettiTrigger` (`'click' | 'mount' | 'inView' | 'manual'`), and `ConfettiTextHandle` (the `{ ref, fire }` returned by `useConfettiText`).
+
 ## How it works
 
-Every character of your text is wrapped in an absolutely-positioned `<span>` inside a single fixed, `pointer-events: none` layer appended to `<body>`. Each frame, one `requestAnimationFrame` loop advances every live piece: `velocity` decays, `gravity`/`drift` accumulate, and a `scaleY(cos(tilt))` term produces the paper flip-through-3D tumble. Spent or off-screen pieces are removed; when none remain, the loop stops. It's all real DOM, so the letters render in your page's font and inherit variable-font axes.
+Every character of your text is wrapped in an absolutely-positioned `<span>` inside a single fixed, `pointer-events: none`, `aria-hidden` layer appended to `<body>`. Each frame, one `requestAnimationFrame` loop advances every live piece: `velocity` decays, `gravity`/`drift` accumulate, and a `scaleY(cos(tilt))` term produces the paper flip-through-3D tumble. Spent or off-screen pieces are removed; when none remain, the loop stops and the layer is detached. It's all real DOM, so the letters render in your (variable) font — element-fired bursts inherit the source element's computed font.
+
+```mermaid
+flowchart LR
+  T["your text"] --> L["split into letters"]
+  L --> S["spawn one span per letter<br/>in a fixed aria-hidden layer"]
+  S --> P["per-frame physics:<br/>velocity·decay + gravity + drift<br/>+ scaleY(cos tilt) tumble"]
+  P --> R{"spent or<br/>off-screen?"}
+  R -- no --> P
+  R -- yes --> X["remove the piece"]
+  X --> E{"any left?"}
+  E -- yes --> P
+  E -- no --> D["detach the layer"]
+```
+
+## Accessibility
+
+- The confetti layer is `aria-hidden` and `pointer-events: none` — it's decorative, never announced, and never intercepts clicks.
+- Bursts are skipped when the user has `prefers-reduced-motion: reduce` (opt back in with `disableForReducedMotion: false`).
+- The `'click'` trigger makes a non-interactive source element keyboard-operable (`tabindex`, `role="button"`, Enter/Space); to opt out, render a real control with `as="button"`, or use `trigger="manual"` and drive `fire()` yourself. The burst itself is a visual flourish and is not announced to screen readers — add your own `aria-live` message if you need to confirm the action.
 
 ## Compatibility
 
